@@ -101,7 +101,7 @@
         .step-number {
             width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
             font-weight: 600; font-size: 0.875rem; background: var(--claude-surface); border: 2px solid var(--claude-border);
-            color: var(--claude-text-light); position: relative; z-index: 2; margin: 0 auto 0.5rem; transition: all 0.2s ease;
+            color: var(--claude-text-light); position: relative; z-index: 2; margin: 0 auto 0.5rem; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
         .step-number.active { background: var(--brand-gradient); color: white; border-color: var(--claude-primary); box-shadow: 0 4px 12px var(--shadow-primary-strong); transform: scale(1.06); }
         .step-number.completed { background: var(--claude-success); color: white; border-color: var(--claude-success); }
@@ -121,53 +121,63 @@
         .form-control-lg { padding: 1rem 1.25rem; font-size: 1.125rem; }
         .form-label { font-weight: 500; color: var(--claude-text); margin-bottom: 0.5rem; font-size: 0.9375rem; }
 
-        .btn { border-radius: 12px; font-weight: 600; padding: 0.875rem 1.75rem; transition: all 0.2s ease; border: none; font-size: 1rem; }
+        /* ============ 更生动的按钮（移植自 Grok 页，配色沿用 Claude） ============ */
+        .btn { border-radius: 12px; font-weight: 600; padding: 0.875rem 1.75rem; border: none; font-size: 1rem; position: relative; overflow: hidden; isolation: isolate; transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease, filter 0.2s ease; }
         .btn-lg { padding: 1.125rem 2rem; font-size: 1.0625rem; }
-        .btn-primary { background: var(--brand-gradient); color: white; box-shadow: 0 2px 8px var(--shadow-primary), 0 1px 0 rgba(255,255,255,0.12) inset; letter-spacing: 0.01em; }
-        .btn-primary:hover { background: var(--claude-primary-dark); transform: translateY(-2px); box-shadow: 0 8px 20px var(--shadow-primary-strong), 0 1px 0 rgba(255,255,255,0.15) inset; }
-        .btn-primary:disabled { background: var(--claude-text-light); opacity: 0.6; cursor: not-allowed; }
+
+        .btn-primary { background: var(--brand-gradient); background-size: 200% 200%; color: white; box-shadow: 0 2px 8px var(--shadow-primary), 0 1px 0 rgba(255,255,255,0.12) inset; letter-spacing: 0.01em; }
+        .btn-primary:hover { color: white; transform: translateY(-2px); box-shadow: 0 8px 20px var(--shadow-primary-strong), 0 1px 0 rgba(255,255,255,0.15) inset; filter: brightness(1.04); }
+        .btn-primary:active { transform: translateY(0) scale(0.985); }
+        .btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--shadow-primary), 0 8px 20px var(--shadow-primary-strong); }
+        .btn-primary:disabled { background: var(--claude-text-light); opacity: 0.6; cursor: not-allowed; transform: none; }
+        /* 高光扫过 */
+        .btn-primary::after { content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%; z-index: -1; background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.28) 50%, transparent 100%); transform: skewX(-18deg); transition: left 0.6s ease; }
+        .btn-primary:hover::after { left: 130%; }
+        /* 主 CTA 呼吸 */
+        .btn-cta-pulse { animation: ctaPulse 2.6s ease-in-out infinite; }
+        @keyframes ctaPulse {
+            0%, 100% { box-shadow: 0 2px 8px var(--shadow-primary), 0 1px 0 rgba(255,255,255,0.12) inset; }
+            50% { box-shadow: 0 2px 8px var(--shadow-primary), 0 0 0 6px rgba(204,120,92,0.10), 0 1px 0 rgba(255,255,255,0.12) inset; }
+        }
+
         .btn-success { background: var(--claude-success); color: white; }
-        .btn-outline-secondary { border: 1.5px solid var(--claude-border); color: var(--claude-text); background: transparent; }
+        .btn-outline-secondary { border: 1.5px solid var(--claude-border); color: var(--claude-text); background: transparent; transition: all 0.2s ease; }
+        .btn-outline-secondary:hover { background: var(--claude-surface); transform: translateY(-1px); }
+
+        /* 点击水波纹 */
+        .ripple { position: absolute; border-radius: 50%; transform: scale(0); background: rgba(255,255,255,0.45); animation: rippleAnim 0.6s linear; pointer-events: none; z-index: 0; }
+        @keyframes rippleAnim { to { transform: scale(4); opacity: 0; } }
+
+        /* 加载态 */
+        .btn.is-loading { pointer-events: none; }
+        .btn.is-loading .btn-label { opacity: 0; }
+        .btn.is-loading::before { content: ''; position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border: 2.5px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: btnSpin 0.7s linear infinite; z-index: 2; }
+        @media (prefers-reduced-motion: reduce) {
+            .btn, .btn-primary::after, .btn-cta-pulse, .step-number { transition: none !important; animation: none !important; }
+        }
 
         .alert { border: 1px solid; border-radius: 12px; padding: 1rem 1.25rem; font-size: 0.9375rem; }
         .alert-success { background: #F0FDF4; border-color: #BBF7D0; color: #166534; }
-        
+
         .progress { border-radius: 12px; background: var(--claude-border); height: 8px; }
         .progress-bar { border-radius: 12px; background: var(--claude-primary); transition: width 0.3s ease; }
 
         .status-card { background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 16px; padding: 2rem; margin-top: 2rem; }
         .footer { text-align: center; padding: 2rem 0; color: var(--claude-text-light); font-size: 0.875rem; }
-        
+
         @media (max-width: 768px) {
             .main-container { margin: 0.75rem; padding: 1.5rem 1.25rem; border-radius: 16px; }
             .btn { width: 100%; padding: 0.75rem 1rem; }
+            #queryCardsBtn { width: auto; }
         }
 
         .site-nav-bar { position: fixed; top: 0.85rem; left: 0.85rem; z-index: 1000; display: flex; align-items: center; gap: 0.5rem; max-width: calc(100vw - 1.7rem); }
-        .site-nav { position: relative; display: inline-block; flex-shrink: 0; }
-        .site-nav[open] .site-nav-trigger-chevron { transform: rotate(180deg); }
-        .site-nav-trigger { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 0.5rem; background: #FFFFFF; border: 1px solid #E8E2D5; border-radius: 999px; padding: 0.45rem 0.85rem 0.45rem 0.5rem; color: #2B2118; font-weight: 600; font-size: 0.8125rem; line-height: 1; box-shadow: 0 2px 8px rgba(43, 33, 24, 0.06); transition: all 0.2s ease; }
-        .site-nav-trigger::-webkit-details-marker, .site-nav-trigger::marker { display: none; }
+        .site-nav-trigger { list-style: none; display: inline-flex; align-items: center; gap: 0.5rem; background: #FFFFFF; border: 1px solid #E8E2D5; border-radius: 999px; padding: 0.45rem 0.85rem 0.45rem 0.5rem; color: #2B2118; font-weight: 600; font-size: 0.8125rem; line-height: 1; box-shadow: 0 2px 8px rgba(43, 33, 24, 0.06); }
         .site-nav-trigger-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--brand-accent); box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset, 0 0 0 2px rgba(255,255,255,0.6); flex-shrink: 0; }
-        .site-nav-trigger-chevron { margin-left: 0.1em; font-size: 0.65rem; color: #8B7355; }
-        
-        .site-nav-menu { position: absolute; top: calc(100% + 0.5rem); left: 0; min-width: 280px; background: #FFFFFF; border: 1px solid #E8E2D5; border-radius: 16px; box-shadow: 0 4px 16px rgba(43, 33, 24, 0.08); padding: 0.4rem; display: flex; flex-direction: column; gap: 0.15rem; }
-        .site-nav-item { display: flex; align-items: center; gap: 0.7rem; padding: 0.55rem 0.65rem; border-radius: 10px; text-decoration: none; color: #2B2118; transition: background 0.15s ease; }
-        .site-nav-item:hover { background: #FAF6EC; }
-        .site-nav-item.active { background: #F0EFEB; cursor: default; }
-        .site-nav-item.active::after { content: ''; margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--brand-accent); }
-        .site-nav-item-icon { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-weight: 800; font-size: 0.95rem; flex-shrink: 0; }
-        .site-nav-icon-pro { background: linear-gradient(135deg, #E89B7F 0%, #CC785C 100%); }
-        .site-nav-icon-grok { background: linear-gradient(135deg, #2C2C2C 0%, #0A0A0A 100%); }
-        .site-nav-item-text { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
-        .site-nav-item-text b { font-weight: 600; font-size: 0.85rem; }
-        .site-nav-item-text em { font-style: normal; font-size: 0.7rem; color: #8B7355; }
-
-        .nav-hint { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.42rem 0.9rem 0.42rem 0.7rem; background: rgba(255, 255, 255, 0.78); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border: 1.5px dashed color-mix(in srgb, var(--brand-accent) 55%, transparent); border-radius: 999px; color: var(--brand-accent); font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: all 0.2s ease; }
 
         .claude-logo { display: inline-flex; align-items: center; gap: 0.625rem; font-size: 1.65rem; font-weight: 700; color: var(--claude-text); }
         .claude-logo-icon { width: 38px; height: 38px; background: var(--brand-gradient); border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; color: white; font-weight: 800; }
-        
+
         .hero-card { position: relative; overflow: hidden; }
         .hero-card::after { content: ''; position: absolute; top: -30px; right: -30px; width: 140px; height: 140px; background: var(--brand-gradient); opacity: 0.06; border-radius: 50%; }
         .brand-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.75rem; border-radius: 999px; background: var(--claude-surface); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; border: 1px solid var(--claude-border); }
@@ -177,7 +187,7 @@
         .price-amount { font-size: 1.65rem; font-weight: 800; }
         .price-period { color: var(--claude-text-light); font-size: 0.8rem; font-weight: 500; margin-left: 0.25em; }
         .price-tag-meta { color: var(--claude-text-light); font-size: 0.7rem; font-weight: 500; margin-left: 0.75em; padding-left: 0.75em; border-left: 1px solid var(--claude-border); text-transform: uppercase; }
-        
+
         .lang-selector { position: fixed; top: 1rem; right: 1rem; z-index: 1000; }
         .lang-selector .dropdown-toggle { background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.875rem; cursor: pointer; }
         .lang-selector .dropdown-menu { min-width: 120px; border-radius: 8px; border: 1px solid var(--claude-border); background: var(--claude-card-bg); }
@@ -186,23 +196,10 @@
 </head>
 <body>
     <div class="site-nav-bar">
-    <details class="site-nav">
-        <summary class="site-nav-trigger" aria-label="切换产品">
+        <span class="site-nav-trigger" style="cursor: default;">
             <span class="site-nav-trigger-dot"></span>
             <span>Claude Pro</span>
-            <span class="site-nav-trigger-chevron">▾</span>
-        </summary>
-        <nav class="site-nav-menu" role="menu">
-            <a class="site-nav-item active" href="https://claude.zlkjgptplus.org" aria-current="page" role="menuitem">
-                <span class="site-nav-item-icon site-nav-icon-pro">C</span>
-                <span class="site-nav-item-text"><b>Claude Pro</b><em>$20 / 月 · Standard</em></span>
-            </a>
-        </nav>
-    </details>
-    <button class="nav-hint" type="button" aria-label="发现更多产品" onclick="var n=this.parentNode.querySelector('.site-nav'); if(n){n.open=!n.open;} this.blur();">
-        <i class="bi bi-arrow-left"></i>
-        <span class="nav-hint-text">发现更多</span>
-    </button>
+        </span>
     </div>
 
     <div class="lang-selector dropdown">
@@ -306,7 +303,7 @@
                                     <input type="text" class="form-control form-control-lg" id="cardCode" placeholder="粘贴您购买的充值码" maxlength="32" required style="font-family: 'Courier New', monospace; letter-spacing: 1px;">
                                     <div class="form-text mt-2" data-i18n="cardCodeHint">购买后会立即收到充值码</div>
                                 </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100" data-i18n="verifyAndContinue">验证并继续</button>
+                                <button type="submit" class="btn btn-primary btn-lg w-100"><span class="btn-label" data-i18n="verifyAndContinue">验证并继续</span></button>
                             </form>
                             <div id="step1-result" class="mt-3"></div>
                         </div>
@@ -327,7 +324,7 @@
                                         <span style="font-size: 0.8125rem; color: var(--claude-text-light);" data-i18n="claudeIdFormat">格式：8位-4位-4位-4位-12位</span>
                                     </div>
                                 </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100" data-i18n="confirmAndUpgrade">确认并升级</button>
+                                <button type="submit" class="btn btn-primary btn-lg w-100"><span class="btn-label" data-i18n="confirmAndUpgrade">确认并升级</span></button>
                             </form>
                             <div id="step2-result" class="mt-3"></div>
                         </div>
@@ -336,10 +333,31 @@
                     <div class="card step-card" id="step3" style="display: none;">
                         <div class="card-header"><h5 class="mb-0" id="step3Title" data-i18n="step3Title">步骤 3 · 立即激活 Claude Pro 会员</h5></div>
                         <div class="card-body">
-                            <button id="startRechargeBtn" class="btn btn-primary btn-lg w-100" style="font-weight: 600;">
-                                <span id="startRechargeBtnText" data-i18n="activateProBtn">立即激活 Claude Pro</span>
+                            <button id="startRechargeBtn" class="btn btn-primary btn-lg w-100 btn-cta-pulse" style="font-weight: 600;">
+                                <span class="btn-label" id="startRechargeBtnText" data-i18n="activateProBtn">立即激活 Claude Pro</span>
                             </button>
                             <div id="step3-result" class="mt-3"></div>
+                        </div>
+                    </div>
+
+                    <!-- ===== 查询卡密状态（折叠区，移植自 Grok 页） ===== -->
+                    <div class="card step-card" style="border: 1px solid var(--claude-border);">
+                        <div class="card-body" style="padding: 0;">
+                            <div style="padding: 0.75rem 1rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between;" onclick="toggleQuerySection()">
+                                <span style="color: var(--claude-text-light); font-size: 0.875rem;" data-i18n="queryCardStatus">查询卡密状态</span>
+                                <span id="queryToggleIcon" style="color: var(--claude-text-light); font-size: 0.75rem;">▼</span>
+                            </div>
+                            <div id="querySection" style="display: none; padding: 0 1rem 1rem 1rem; border-top: 1px solid var(--claude-border);">
+                                <div class="mb-2" style="margin-top: 1rem;">
+                                    <textarea id="queryCodesInput" class="form-control" rows="3" placeholder="输入卡密，一行一个..." style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem;"></textarea>
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                    <button id="queryCardsBtn" class="btn btn-sm btn-primary" onclick="queryCards()" style="font-size: 0.8125rem;"><span class="btn-label">查询</span></button>
+                                </div>
+                                <div id="queryResultsContainer" style="display: none; margin-top: 0.75rem;">
+                                    <textarea id="queryResultsOutput" class="form-control" rows="4" readonly style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem; background: var(--claude-surface);"></textarea>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -359,16 +377,7 @@
         // ===================================================================
         //  接口配置：走 Worker（c.zlkjgptplus.org）· 密钥由 Worker 注入，前端不暴露
         // ===================================================================
-        //  当前为【Worker 模式】：API_BASE 指向你的 Worker，API_KEY 留空。
-        //  Worker 已部署在 c.zlkjgptplus.org（自定义域），会注入 Authorization
-        //  并返回 CORS 头，从而避免密钥暴露 + 跨域被拦。
-        //
-        //  如需临时直连调试（不安全），把 API_BASE 改回
-        //  'https://dlsapi.6661231.xyz/api/v1' 并把 API_KEY 填上 sk_ 密钥即可。
-        // ===================================================================
         window.API_BASE = window.API_BASE || 'https://c.zlkjgptplus.org/api/v1';
-
-        // Worker 模式：留空！密钥由 Worker 服务端注入，绝不要写在这里。
         window.API_KEY  = (typeof window.API_KEY === 'string') ? window.API_KEY : '';
 
         const API = {
@@ -386,6 +395,7 @@
 
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof initLanguage === 'function') initLanguage();
+            attachRipples();
             initStock();
             initActivationFlow();
         });
@@ -409,6 +419,7 @@
             for (let i = 1; i <= 3; i++) {
                 const card = document.getElementById('step' + i);
                 const ind  = document.getElementById('step' + i + '-indicator');
+                const label = ind ? ind.parentElement.querySelector('.step-label') : null;
                 if (card) { card.style.display = (i === n) ? '' : 'none'; card.classList.toggle('active', i === n); }
                 if (ind) {
                     ind.classList.remove('active', 'completed');
@@ -416,6 +427,7 @@
                     else if (i === n) { ind.classList.add('active'); ind.textContent = i; }
                     else { ind.textContent = i; }
                 }
+                if (label) label.classList.toggle('active', i === n);
             }
             const top = document.querySelector('.steps-container');
             if (top) top.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -429,6 +441,23 @@
         }
         function clearMsg(elId) { const el = document.getElementById(elId); if (el) el.innerHTML = ''; }
         window.setBtnLoading = function (btn, on) { if (btn) btn.classList.toggle('is-loading', !!on); };
+
+        /* ---------- 按钮水波纹 ---------- */
+        function attachRipples() {
+            document.addEventListener('click', function (e) {
+                const btn = e.target.closest('.btn');
+                if (!btn || btn.classList.contains('is-loading') || btn.disabled) return;
+                const rect = btn.getBoundingClientRect();
+                const size = Math.max(rect.width, rect.height);
+                const r = document.createElement('span');
+                r.className = 'ripple';
+                r.style.width = r.style.height = size + 'px';
+                r.style.left = (e.clientX - rect.left - size / 2) + 'px';
+                r.style.top = (e.clientY - rect.top - size / 2) + 'px';
+                btn.appendChild(r);
+                setTimeout(() => r.remove(), 600);
+            });
+        }
 
         // ISO 时间 → 本地可读
         function formatTime(v) {
@@ -449,7 +478,7 @@
             if (c.startsWith('bbc20x')) return 'max_20x';
             if (c.startsWith('bbc5x'))  return 'max_5x';
             if (c.startsWith('bbc'))    return 'pro';
-            return '';  // lllcc 等 → 不传 expected_plan，由服务端自行校验
+            return '';
         }
 
         /* ---------- 激活流程 ---------- */
@@ -533,18 +562,18 @@
                 return;
             }
             setBtnLoading(btn, true);
+            btn.classList.remove('btn-cta-pulse');
             showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在为账号 ' +
                 flow.claudeUserId.slice(0, 8) + '… 充值,约需 1–2 分钟,请勿关闭页面…');
 
             try {
                 const payload = { cdk: flow.cdk, claude_user_id: flow.claudeUserId };
-                if (flow.plan) payload.expected_plan = flow.plan;   // 拿得准才传，避免误判被拒
+                if (flow.plan) payload.expected_plan = flow.plan;
 
                 const r = await apiFetch(API.redeem, { method: 'POST', body: JSON.stringify(payload) });
                 const b = r.body || {};
                 const code = String(b.code || (b.data && b.data.code) || '').toUpperCase();
 
-                // 「已预占 / 处理中」不是失败：卡密已进入充值队列
                 const reserved = r.status === 409 || code === 'CDK_RESERVED' ||
                     code === 'CDK_PROCESSING' || code === 'PROCESSING';
 
@@ -558,7 +587,6 @@
                         '<span class="spinner-border spinner-border-sm me-2"></span>该卡密已在充值队列中,正在为你确认结果,请稍候…');
                 }
 
-                // 轮询 /cdk/info，等 used 变为 true = 到账成功
                 const fin = await pollRedeemResult(flow.cdk);
                 if (fin.ok) {
                     const detail = fin.detail || 'Claude 会员已到账,可前往 claude.ai 查看。';
@@ -567,11 +595,12 @@
                     rechargeDone = true;
                     const btnText = document.getElementById('startRechargeBtnText');
                     if (btnText) btnText.textContent = '🔄 返回首页 · 重新兑换';
+                    if (btn) btn.classList.add('btn-cta-pulse');
                     fetchStock();
                 } else if (fin.timeout) {
                     showMsg('step3-result', 'error',
                         '⌛ 充值仍在处理中（' + Math.round((fin.waited || 0) / 1000) + '秒内未确认到账）。' +
-                        '卡密 ' + flow.cdk.slice(0, 10) + '… 已进入队列,请稍后联系客服核对。');
+                        '卡密 ' + flow.cdk.slice(0, 10) + '… 已进入队列,请稍后用下方「查询卡密状态」确认,或联系客服核对。');
                 } else {
                     showMsg('step3-result', 'error', '❌ 充值失败:' + (fin.reason || '未知错误') + '。请联系客服。');
                 }
@@ -616,9 +645,71 @@
             const info = document.getElementById('cardInfo'); if (info) info.textContent = '';
             const btnText = document.getElementById('startRechargeBtnText');
             if (btnText) btnText.textContent = '立即激活 Claude Pro';
-            const startBtn = document.getElementById('startRechargeBtn'); setBtnLoading(startBtn, false);
+            const startBtn = document.getElementById('startRechargeBtn');
+            if (startBtn) { startBtn.classList.add('btn-cta-pulse'); setBtnLoading(startBtn, false); }
             goToStep(1);
             if (cc) { try { cc.focus(); } catch (e) {} }
+        }
+
+        /* ---------- 查询卡密状态（移植自 Grok 页，接口指向 Claude /cdk/info） ---------- */
+        function toggleQuerySection() {
+            const section = document.getElementById('querySection');
+            const icon = document.getElementById('queryToggleIcon');
+            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+            icon.textContent = section.style.display === 'none' ? '▼' : '▲';
+        }
+
+        function pickField(obj, keys) {
+            for (let i = 0; i < keys.length; i++) {
+                const v = obj ? obj[keys[i]] : undefined;
+                if (v != null && v !== '') return v;
+            }
+            return '';
+        }
+        const USE_TIME_KEYS = ['usedAt', 'used_at', 'use_time', 'used_time', 'redeem_time'];
+        const USE_USER_KEYS = ['account_id', 'email', 'claude_user_id', 'user_id', 'target'];
+
+        function formatCardStatus(code, r) {
+            if (r.status === 404) return code + ': ⚠️ 卡密不存在';
+            if (r.status === 400) return code + ': ⚠️ 格式不正确';
+            const d = (r.body && r.body.data) ? r.body.data : null;
+            if (!r.ok || !d) {
+                const b = r.body || {};
+                return code + ': ⚠️ ' + (b.message || b.error || b.msg || '查询失败');
+            }
+            if (d.used !== true) return code + ': ✅ 未使用';
+            let line = code + ': ❌ 已使用';
+            const t = pickField(d, USE_TIME_KEYS);
+            if (t) line += '（' + formatTime(t) + '）';
+            const u = (d.binding && (d.binding.email || d.binding.account_id)) || pickField(d, USE_USER_KEYS);
+            if (u) line += ' 账号: ' + u;
+            return line;
+        }
+
+        async function queryCards() {
+            const input = document.getElementById('queryCodesInput');
+            const out = document.getElementById('queryResultsOutput');
+            const container = document.getElementById('queryResultsContainer');
+            const btn = document.getElementById('queryCardsBtn');
+            const codes = input.value.split('\n').map(s => s.trim()).filter(Boolean);
+            if (!codes.length) { return; }
+            setBtnLoading(btn, true);
+            container.style.display = 'block';
+            out.value = '查询中…';
+            try {
+                const lines = [];
+                for (const code of codes) {
+                    try {
+                        const r = await apiFetch(API.cdkInfo + '?cdk=' + encodeURIComponent(code), { method: 'GET' });
+                        lines.push(formatCardStatus(code, r));
+                    } catch (e) {
+                        lines.push(code + ': ⚠️ 网络错误');
+                    }
+                }
+                out.value = lines.join('\n') || '未查询到结果';
+            } finally {
+                setBtnLoading(btn, false);
+            }
         }
 
         /* ---------- 实时库存（只取 Pro） ---------- */
@@ -636,7 +727,6 @@
         const AVAIL_KEYS = ['available', 'avail', 'remaining', 'remain', 'stock', 'left', 'count', 'quantity'];
         const TOTAL_KEYS = ['total', 'capacity', 'max', 'quota', 'sum'];
 
-        // 从一个节点读出 {avail,total}：节点可能是纯数字，或带 available/total 的对象
         function readStockNode(node) {
             if (node == null) return null;
             if (typeof node === 'number') return { avail: node, total: null };
@@ -646,7 +736,6 @@
             }
             return null;
         }
-        // 在数组里找 sku 字段等于 pro 的那一项
         function findSkuInArray(arr, sku) {
             for (const it of arr) {
                 if (it && typeof it === 'object') {
@@ -659,17 +748,13 @@
             }
             return null;
         }
-        // 从 /claude/stock 的返回里提取指定 SKU 的库存（兼容多种结构）
         function extractSkuStock(root, sku) {
             const d = (root && typeof root === 'object' && 'data' in root) ? root.data : root;
-            // 1) 数组：[{sku:'pro',available:..}, ...]
             if (Array.isArray(d)) return findSkuInArray(d, sku);
             if (d && typeof d === 'object') {
-                // 2) 以套餐为键：{pro:1881} 或 {pro:{available:1881,total:..}}
                 for (const k of [sku, 'pro', 'Pro', 'PRO']) {
                     if (d[k] !== undefined) { const r = readStockNode(d[k]); if (r) return r; }
                 }
-                // 3) 数组挂在子字段下：{skus:[...]} / {items:[...]} / {list:[...]}
                 for (const arrKey of ['skus', 'items', 'list', 'stocks', 'plans', 'data']) {
                     if (Array.isArray(d[arrKey])) { const r = findSkuInArray(d[arrKey], sku); if (r) return r; }
                 }
@@ -699,9 +784,7 @@
                 const r = await apiFetch(STOCK_URL, { method: 'GET' });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const root = r.body || {};
-                // 只取 Pro 这个 SKU
                 let s = extractSkuStock(root, TARGET_SKU);
-                // 兜底：若接口本身只返回 Pro（扁平结构），直接读
                 if (!s) {
                     const d = (root && typeof root === 'object' && 'data' in root) ? root.data : root;
                     s = readStockNode(d) || (typeof root === 'number' ? { avail: root, total: null } : null);
