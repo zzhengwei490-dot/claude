@@ -300,7 +300,7 @@
                             <form id="activateForm">
                                 <div class="mb-4">
                                     <label for="cardCode" class="form-label" data-i18n="cardCodeLabel">充值码</label>
-                                    <input type="text" class="form-control form-control-lg" id="cardCode" placeholder="粘贴您购买的充值码" maxlength="32" required style="font-family: 'Courier New', monospace; letter-spacing: 1px;">
+                                    <input type="text" class="form-control form-control-lg" id="cardCode" placeholder="粘贴您购买的充值码" maxlength="64" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required style="font-family: 'Courier New', monospace; letter-spacing: 1px;">
                                     <div class="form-text mt-2" data-i18n="cardCodeHint">购买后会立即收到充值码</div>
                                 </div>
                                 <button type="submit" class="btn btn-primary btn-lg w-100"><span class="btn-label" data-i18n="verifyAndContinue">验证并继续</span></button>
@@ -491,7 +491,7 @@
             if (actForm) actForm.addEventListener('submit', async function (e) {
                 e.preventDefault();
                 const btn = actForm.querySelector('button[type=submit]');
-                const cdk = document.getElementById('cardCode').value.trim();
+                const cdk = document.getElementById('cardCode').value.replace(/\s+/g, '');
                 clearMsg('step1-result');
                 if (!cdk) { showMsg('step1-result', 'error', '请输入充值码'); return; }
 
