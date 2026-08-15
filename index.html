@@ -1042,7 +1042,7 @@
             }
         }
 
-        /* ---------- 卡密查询：Worker 自动识别双后台 ---------- */
+        /* ---------- 卡密查询：Worker 自动识别双后台；vip666 使用 query-batch ---------- */
         function toggleQuerySection() {
             const section = document.getElementById('querySection');
             const icon = document.getElementById('queryToggleIcon');
@@ -1051,17 +1051,27 @@
         }
 
         function formatCardQueryItem(item) {
-            const code = item.code || item.serialNumber || '-';
+            const code = item.code || item.card_code || item.cardCode || item.serialNumber || '-';
             const status = Number(item.status);
             let line;
             if (status === 0) line = code + ': ✅ 未使用';
-            else if (status === 1 || status === 2) line = code + ': ❌ ' + (item.message || '已使用');
+            else if (status === 1 || status === 2) line = code + ': ✅ ' + (item.message || '已使用');
+            else if (status === 8) line = code + ': ⏳ ' + (item.message || '处理中');
             else line = code + ': ⚠️ ' + (item.message || '异常/作废');
 
-            if (item.productName) line += ' · ' + item.productName;
-            const account = item.email || item.organizationId || item.accountId || '';
-            if (account) line += ' · 账号：' + account;
-            if (item.usedTime) line += ' · 时间：' + formatTime(item.usedTime);
+            const productName = item.productName || item.product_name || item.planName || item.plan_name || '';
+            if (productName) line += ' · ' + productName;
+
+            // vip666 query-batch 会返回 AccountID / 开通时间；兼容不同字段命名。
+            const orgId = item.organizationId || item.organization_id || item.accountId || item.account_id ||
+                item.orgId || item.org_id || item.targetAccountId || item.target_account_id || '';
+            if (orgId) line += ' · 组织ID：' + orgId;
+
+            const rechargeTime = item.usedTime || item.used_time || item.usedAt || item.used_at ||
+                item.redeemedAt || item.redeemed_at || item.activatedAt || item.activated_at ||
+                item.completedAt || item.completed_at || item.openTime || item.open_time || '';
+            if (rechargeTime) line += ' · 充值时间：' + formatTime(rechargeTime);
+
             return line;
         }
 
