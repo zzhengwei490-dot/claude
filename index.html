@@ -609,8 +609,8 @@
     <script src="/public/js/lang.js?v=20260524006"></script>
     <script>
         // ===================================================================
-        //  新后台：claude.hongyunai.pro
-        //  前端只访问 Worker；Worker 再映射到 claude.php?action=step1...step4
+        //  双后台：claude.hongyunai.pro + vip666ai.com
+        //  前端只访问 Worker；Worker 自动识别卡密所属后台并统一返回结构。
         // ===================================================================
         window.API_BASE = window.API_BASE || 'https://c.zlkjgptplus.org/api/v1';
 
@@ -627,7 +627,9 @@
             cdk: '',
             claudeUserId: '',
             productName: '',
-            orderNo: ''
+            orderNo: '',
+            provider: '',
+            pollToken: ''
         };
         let rechargeDone = false;
 
@@ -801,7 +803,7 @@
             const bindForm = document.getElementById('bindForm');
             const startBtn = document.getElementById('startRechargeBtn');
 
-            // 新后台 step1：{ serialNumber }
+            // Worker 会根据卡密自动选择 HongYun / vip666ai。
             if (actForm) actForm.addEventListener('submit', async function (e) {
                 e.preventDefault();
                 const btn = actForm.querySelector('button[type=submit]');
@@ -833,8 +835,10 @@
                     }
 
                     flow.cdk = cdk;
-                    flow.productName = d.productName || d.planName || d.product || 'Claude Pro';
+                    flow.productName = d.productName || d.product_name || d.planName || d.product || 'Claude Pro';
                     flow.orderNo = '';
+                    flow.provider = d.provider || b.provider || '';
+                    flow.pollToken = '';
 
                     const info = document.getElementById('cardInfo');
                     if (info) info.textContent = '套餐：' + flow.productName;
@@ -846,7 +850,7 @@
                 }
             });
 
-            // 本地先做 UUID 格式校验，真正的账号校验由新后台 step2 完成。
+            // 本地先做 UUID 格式校验；HongYun 会继续预检，vip666ai 在 redeem 阶段完成校验。
             if (bindForm) bindForm.addEventListener('submit', function (e) {
                 e.preventDefault();
                 const uid = (document.getElementById('claudeUserId').value || '').trim();
@@ -865,7 +869,7 @@
             });
         }
 
-        /* ---------- 新后台完整充值链：step2 -> step3 -> step4 轮询 -> saveRecord ---------- */
+        /* ---------- 双后台统一充值链：step2 -> step3 -> step4 轮询 -> saveRecord ---------- */
         async function runRedeem() {
             const btn = document.getElementById('startRechargeBtn');
             if (!flow.cdk || !flow.claudeUserId) {
@@ -881,7 +885,11 @@
 
                 const r2 = await apiFetch(API.step2, {
                     method: 'POST',
-                    body: JSON.stringify({ organizationId: flow.claudeUserId })
+                    body: JSON.stringify({
+                        organizationId: flow.claudeUserId,
+                        serialNumber: flow.cdk,
+                        provider: flow.provider
+                    })
                 });
                 if (!r2.ok || !isBizSuccess(r2.body)) {
                     throw new Error(getErrorMessage(r2, '账号校验失败'));
@@ -893,7 +901,10 @@
                     method: 'POST',
                     body: JSON.stringify({
                         organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk
+                        serialNumber: flow.cdk,
+                        provider: flow.provider,
+                        recharge_mode: 'claude_org',
+                        confirm_overwrite: false
                     })
                 });
                 if (!r3.ok || !isBizSuccess(r3.body)) {
@@ -901,10 +912,13 @@
                 }
 
                 const b3 = r3.body || {};
-                const orderNo = (b3.data && b3.data.orderNo) || b3.orderNo || '';
+                const d3 = b3.data || {};
+                const orderNo = d3.orderNo || d3.order_no || b3.orderNo || b3.order_no || '';
                 if (!orderNo) throw new Error('生成订单成功，但接口未返回 orderNo');
 
                 flow.orderNo = String(orderNo);
+                flow.provider = d3.provider || flow.provider || b3.provider || '';
+                flow.pollToken = d3.pollToken || d3.poll_token || b3.pollToken || b3.poll_token || '';
                 const fin = await pollOrderResult(flow.orderNo);
 
                 if (fin.ok) {
@@ -953,7 +967,11 @@
                 try {
                     const r = await apiFetch(API.step4, {
                         method: 'POST',
-                        body: JSON.stringify({ orderNo: orderNo })
+                        body: JSON.stringify({
+                            orderNo: orderNo,
+                            provider: flow.provider,
+                            pollToken: flow.pollToken
+                        })
                     });
                     const b = r.body || {};
                     const d = b.data || {};
@@ -980,7 +998,9 @@
                         method: 'POST',
                         body: JSON.stringify({
                             serialNumber: flow.cdk,
-                            organizationId: flow.claudeUserId
+                            organizationId: flow.claudeUserId,
+                            provider: flow.provider,
+                            pollToken: flow.pollToken
                         })
                     });
                     // saveRecord 的原页面没有检查业务 code；HTTP 可达即视为已提交。
@@ -997,6 +1017,8 @@
             flow.claudeUserId = '';
             flow.productName = '';
             flow.orderNo = '';
+            flow.provider = '';
+            flow.pollToken = '';
 
             const cc = document.getElementById('cardCode');
             const cu = document.getElementById('claudeUserId');
@@ -1020,7 +1042,7 @@
             }
         }
 
-        /* ---------- 卡密查询：新后台 cardQuery ---------- */
+        /* ---------- 卡密查询：Worker 自动识别双后台 ---------- */
         function toggleQuerySection() {
             const section = document.getElementById('querySection');
             const icon = document.getElementById('queryToggleIcon');
@@ -1033,8 +1055,8 @@
             const status = Number(item.status);
             let line;
             if (status === 0) line = code + ': ✅ 未使用';
-            else if (status === 1 || status === 2) line = code + ': ❌ 已使用';
-            else line = code + ': ⚠️ 异常/作废';
+            else if (status === 1 || status === 2) line = code + ': ❌ ' + (item.message || '已使用');
+            else line = code + ': ⚠️ ' + (item.message || '异常/作废');
 
             if (item.productName) line += ' · ' + item.productName;
             const account = item.email || item.organizationId || item.accountId || '';
