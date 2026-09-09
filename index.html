@@ -588,6 +588,22 @@
                                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                                     <button id="queryCardsBtn" class="btn btn-sm btn-primary" data-loading-text="正在查询" onclick="queryCards()" style="font-size: 0.8125rem;"><span class="btn-label">查询</span></button>
                                 </div>
+
+                                <!-- vip666 首次查询需要人机验证；验证成功后约 2 小时内自动复用 -->
+                                <div id="queryVerifyBox" style="display:none; margin-top:0.75rem; padding:0.85rem; border:1px solid var(--claude-border); border-radius:0.65rem; background:var(--claude-surface);">
+                                    <div style="font-size:0.8125rem; color:var(--claude-text); font-weight:600; margin-bottom:0.55rem;">安全验证</div>
+                                    <div style="font-size:0.75rem; color:var(--claude-text-light); margin-bottom:0.65rem;">首次查询请输入图片验证码；验证通过后正常查询无需每次验证。</div>
+                                    <div style="display:flex; align-items:center; gap:0.65rem; flex-wrap:wrap;">
+                                        <img id="queryVerifyImage" alt="验证码" style="display:none; max-width:180px; min-height:44px; border-radius:0.45rem; border:1px solid var(--claude-border); background:#fff; object-fit:contain;">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshQueryChallenge()" style="font-size:0.75rem; padding:0.5rem 0.7rem; min-height:auto;">刷新验证码</button>
+                                    </div>
+                                    <div style="display:flex; gap:0.5rem; margin-top:0.65rem; align-items:center;">
+                                        <input id="queryVerifyAnswer" class="form-control" autocomplete="off" inputmode="numeric" placeholder="输入验证码" style="font-size:0.8125rem; padding:0.6rem 0.75rem;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitQueryVerification();}">
+                                        <button id="queryVerifySubmitBtn" type="button" class="btn btn-sm btn-primary" onclick="submitQueryVerification()" style="font-size:0.75rem; padding:0.55rem 0.8rem; min-height:auto; white-space:nowrap;"><span class="btn-label">确认验证</span></button>
+                                    </div>
+                                    <div id="queryVerifyStatus" style="font-size:0.75rem; color:var(--claude-text-light); margin-top:0.5rem;"></div>
+                                </div>
+
                                 <div id="queryResultsContainer" style="display: none; margin-top: 0.75rem;">
                                     <textarea id="queryResultsOutput" class="form-control" rows="4" readonly style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem; background: var(--claude-surface);"></textarea>
                                 </div>
@@ -615,12 +631,14 @@
         window.API_BASE = window.API_BASE || 'https://c.zlkjgptplus.org/api/v1';
 
         const API = {
-            step1:      window.API_BASE + '/claude/step1',
-            step2:      window.API_BASE + '/claude/step2',
-            step3:      window.API_BASE + '/claude/step3',
-            step4:      window.API_BASE + '/claude/step4',
-            saveRecord: window.API_BASE + '/claude/save-record',
-            cardQuery:  window.API_BASE + '/claude/card-query'
+            step1:             window.API_BASE + '/claude/step1',
+            step2:             window.API_BASE + '/claude/step2',
+            step3:             window.API_BASE + '/claude/step3',
+            step4:             window.API_BASE + '/claude/step4',
+            saveRecord:        window.API_BASE + '/claude/save-record',
+            cardQuery:         window.API_BASE + '/claude/card-query',
+            cardQueryChallenge: window.API_BASE + '/claude/card-query-challenge',
+            cardQueryVerify:    window.API_BASE + '/claude/card-query-verify'
         };
 
         const flow = {
@@ -632,6 +650,14 @@
             pollToken: ''
         };
         let rechargeDone = false;
+
+        // vip666 卡密查询的人机验证状态。验证一次后，上游默认记住约 2 小时。
+        const QUERY_SESSION_STORAGE_KEY = 'vip666_query_session_v2';
+        const queryVerifyState = {
+            challengeId: '',
+            challengeToken: '',
+            pendingCodes: []
+        };
 
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof initLanguage === 'function') initLanguage();
@@ -1075,12 +1101,165 @@
             return line;
         }
 
-        async function queryCards() {
+        function getStoredQuerySessionToken() {
+            try {
+                const raw = localStorage.getItem(QUERY_SESSION_STORAGE_KEY);
+                if (!raw) return '';
+                const saved = JSON.parse(raw);
+                if (!saved || !saved.token) return '';
+                if (saved.expiresAt && Date.now() >= Number(saved.expiresAt)) {
+                    localStorage.removeItem(QUERY_SESSION_STORAGE_KEY);
+                    return '';
+                }
+                return String(saved.token);
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function saveQuerySessionToken(token, rememberSeconds) {
+            try {
+                const seconds = Math.max(60, Number(rememberSeconds || 7200));
+                localStorage.setItem(QUERY_SESSION_STORAGE_KEY, JSON.stringify({
+                    token: String(token || ''),
+                    expiresAt: Date.now() + seconds * 1000 - 5000
+                }));
+            } catch (e) { /* localStorage 不可用时仅本次页面有效 */ }
+        }
+
+        function clearQuerySessionToken() {
+            try { localStorage.removeItem(QUERY_SESSION_STORAGE_KEY); } catch (e) {}
+        }
+
+        function isQueryVerificationRequired(r) {
+            const b = r && r.body ? r.body : {};
+            const d = b && b.data && typeof b.data === 'object' ? b.data : {};
+            return Number(r && r.status) === 428 || d.needVerification === true || b.needVerification === true;
+        }
+
+        function hideQueryVerifyBox() {
+            const box = document.getElementById('queryVerifyBox');
+            if (box) box.style.display = 'none';
+            const answer = document.getElementById('queryVerifyAnswer');
+            if (answer) answer.value = '';
+        }
+
+        async function beginQueryVerification(codes) {
+            const box = document.getElementById('queryVerifyBox');
+            const img = document.getElementById('queryVerifyImage');
+            const status = document.getElementById('queryVerifyStatus');
+            const answer = document.getElementById('queryVerifyAnswer');
+            const out = document.getElementById('queryResultsOutput');
+
+            queryVerifyState.pendingCodes = Array.isArray(codes) ? codes.slice() : [];
+            queryVerifyState.challengeId = '';
+            queryVerifyState.challengeToken = '';
+
+            if (box) box.style.display = 'block';
+            if (img) { img.style.display = 'none'; img.removeAttribute('src'); }
+            if (status) status.textContent = '正在获取验证码…';
+            if (answer) answer.value = '';
+            if (out) out.value = 'vip666 查询需要先完成一次安全验证。';
+
+            try {
+                const r = await apiFetch(API.cardQueryChallenge, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                const b = r.body || {};
+                const d = b.data || {};
+                if (!r.ok || !isBizSuccess(b) || !d.challengeToken || !d.challengeId || !d.image) {
+                    if (status) status.textContent = '验证码获取失败：' + getErrorMessage(r, '上游未返回完整验证码数据');
+                    return false;
+                }
+
+                queryVerifyState.challengeId = String(d.challengeId);
+                queryVerifyState.challengeToken = String(d.challengeToken);
+                if (img) {
+                    img.src = String(d.image);
+                    img.style.display = 'block';
+                }
+                if (status) status.textContent = '请输入图片中的验证码，然后点击“确认验证”。';
+                if (answer) {
+                    try { answer.focus(); } catch (e) {}
+                }
+                return true;
+            } catch (e) {
+                if (status) status.textContent = '验证码获取失败：网络连接错误';
+                return false;
+            }
+        }
+
+        async function refreshQueryChallenge() {
+            const codes = queryVerifyState.pendingCodes.length
+                ? queryVerifyState.pendingCodes
+                : document.getElementById('queryCodesInput').value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
+            if (!codes.length) return;
+            await beginQueryVerification(codes);
+        }
+
+        async function submitQueryVerification() {
+            const answerInput = document.getElementById('queryVerifyAnswer');
+            const status = document.getElementById('queryVerifyStatus');
+            const btn = document.getElementById('queryVerifySubmitBtn');
+            const answer = answerInput ? answerInput.value.trim() : '';
+
+            if (!queryVerifyState.challengeId || !queryVerifyState.challengeToken) {
+                if (status) status.textContent = '验证码已失效，请刷新验证码。';
+                return;
+            }
+            if (!answer) {
+                if (status) status.textContent = '请输入验证码。';
+                if (answerInput) answerInput.focus();
+                return;
+            }
+
+            setBtnLoading(btn, true, '正在验证');
+            if (status) status.textContent = '正在验证…';
+
+            try {
+                const r = await apiFetch(API.cardQueryVerify, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        challengeId: queryVerifyState.challengeId,
+                        challengeToken: queryVerifyState.challengeToken,
+                        answer: answer
+                    })
+                });
+                const b = r.body || {};
+                const d = b.data || {};
+
+                if (!r.ok || !isBizSuccess(b) || d.verified !== true || !d.querySessionToken) {
+                    if (status) status.textContent = '验证失败：' + getErrorMessage(r, '验证码错误或已过期');
+                    if (answerInput) {
+                        answerInput.value = '';
+                        try { answerInput.focus(); } catch (e) {}
+                    }
+                    return;
+                }
+
+                saveQuerySessionToken(d.querySessionToken, d.rememberSeconds || d.remember_seconds || 7200);
+                if (status) status.textContent = '验证成功，正在继续查询…';
+                const pending = queryVerifyState.pendingCodes.slice();
+                hideQueryVerifyBox();
+                queryVerifyState.challengeId = '';
+                queryVerifyState.challengeToken = '';
+                await queryCards(pending);
+            } catch (e) {
+                if (status) status.textContent = '验证失败：网络连接错误';
+            } finally {
+                setBtnLoading(btn, false);
+            }
+        }
+
+        async function queryCards(codesOverride) {
             const input = document.getElementById('queryCodesInput');
             const out = document.getElementById('queryResultsOutput');
             const container = document.getElementById('queryResultsContainer');
             const btn = document.getElementById('queryCardsBtn');
-            const codes = input.value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
+            const codes = Array.isArray(codesOverride) && codesOverride.length
+                ? codesOverride.slice()
+                : input.value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
             if (!codes.length) return;
 
             setBtnLoading(btn, true, '正在查询');
@@ -1088,18 +1267,31 @@
             out.value = '查询中…';
 
             try {
+                const querySessionToken = getStoredQuerySessionToken();
                 const r = await apiFetch(API.cardQuery, {
                     method: 'POST',
-                    body: JSON.stringify({ codes: codes })
+                    body: JSON.stringify({
+                        codes: codes,
+                        querySessionToken: querySessionToken
+                    })
                 });
                 const b = r.body || {};
+
+                if (isQueryVerificationRequired(r)) {
+                    clearQuerySessionToken();
+                    await beginQueryVerification(codes);
+                    return;
+                }
+
                 if (!r.ok || !isBizSuccess(b) || !Array.isArray(b.data)) {
                     out.value = '查询失败：' + getErrorMessage(r, '上游接口异常或卡密格式错误');
                     return;
                 }
+
+                hideQueryVerifyBox();
                 out.value = b.data.map(formatCardQueryItem).join('\n') || '未查询到结果';
             } catch (e) {
-                out.value = '查询失败：网络连接错误';
+                out.value = '查询失败：' + (e && e.message ? e.message : '网络连接错误');
             } finally {
                 setBtnLoading(btn, false);
             }
