@@ -138,6 +138,27 @@
         .alert { border: 1px solid; border-radius: 12px; padding: 1rem 1.25rem; font-size: 0.9375rem; }
         .alert-success { background: #F0FDF4; border-color: #BBF7D0; color: #166534; }
 
+        /* ============ 实时库存组件（沿用 Grok 前端布局，Claude 配色） ============ */
+        .stock-card { margin-top: 1rem; padding: 0.85rem 1rem; background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 14px; }
+        .stock-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+        .stock-live { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; font-weight: 700; color: var(--claude-text-light); letter-spacing: 0.02em; }
+        .stock-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--claude-success); position: relative; }
+        .stock-live-dot::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--claude-success); opacity: 0; animation: stockPing 1.8s ease-out infinite; }
+        @keyframes stockPing { 0% { transform: scale(0.6); opacity: 0.6; } 80%, 100% { transform: scale(1.6); opacity: 0; } }
+        @keyframes stockSpin { to { transform: rotate(360deg); } }
+        .stock-num { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--claude-text); font-size: 1.05rem; }
+        .stock-num small { font-weight: 600; color: var(--claude-text-light); font-size: 0.72rem; }
+        .stock-bar { margin-top: 0.6rem; height: 8px; border-radius: 999px; background: var(--claude-surface); overflow: hidden; border: 1px solid var(--claude-border); }
+        .stock-bar-fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #22C55E, #16A34A); transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
+        .stock-card.is-low .stock-live-dot, .stock-card.is-low .stock-live-dot::after { background: var(--claude-warning); border-color: var(--claude-warning); }
+        .stock-card.is-low .stock-bar-fill { background: linear-gradient(90deg, #F59E0B, #D97706); }
+        .stock-card.is-out .stock-live-dot, .stock-card.is-out .stock-live-dot::after { background: var(--claude-danger); border-color: var(--claude-danger); }
+        .stock-card.is-out .stock-bar-fill { background: var(--claude-danger); }
+        .stock-card.is-loading-skeleton .stock-num { color: var(--claude-border); }
+        .stock-refresh { background: none; border: none; padding: 0.15rem; color: var(--claude-text-light); cursor: pointer; line-height: 1; border-radius: 6px; transition: transform 0.4s ease, color 0.2s ease; }
+        .stock-refresh:hover { color: var(--claude-text); }
+        .stock-refresh.spinning { animation: stockSpin 0.7s linear infinite; }
+
         .progress { border-radius: 12px; background: var(--claude-border); height: 8px; }
         .progress-bar { border-radius: 12px; background: var(--claude-primary); transition: width 0.3s ease; }
 
@@ -485,7 +506,25 @@
                                     <span class="price-tag-meta">Standard</span>
                                 </div>
                             </div>
-                            <div class="row g-2 mb-3 trust-features">
+
+                            <!-- ===== 实时库存 ===== -->
+                            <div class="stock-card is-loading-skeleton" id="stockCard">
+                                <div class="stock-top">
+                                    <span class="stock-live">
+                                        <span class="stock-live-dot"></span>
+                                        <span>实时库存</span>
+                                    </span>
+                                    <span style="display:flex; align-items:center; gap:0.5rem;">
+                                        <span class="stock-num"><span id="stockAvail">—</span><small> / <span id="stockTotal">—</span></small></span>
+                                        <button class="stock-refresh" id="stockRefresh" type="button" aria-label="刷新库存" title="刷新">
+                                            <i class="bi bi-arrow-clockwise"></i>
+                                        </button>
+                                    </span>
+                                </div>
+                                <div class="stock-bar"><div class="stock-bar-fill" id="stockBar"></div></div>
+                            </div>
+
+                            <div class="row g-2 mb-3 trust-features" style="margin-top: 1rem;">
                                 <div class="col-4">
                                     <div class="text-center" style="padding: 0.75rem 0.5rem; background: var(--claude-surface); border-radius: 8px; border: 1px solid var(--claude-border);">
                                         <div style="font-size: 1.5rem; margin-bottom: 0.5rem;"><i class="bi bi-shield-check"></i></div>
@@ -622,7 +661,8 @@
             step3:      window.API_BASE + '/claude/step3',
             step4:      window.API_BASE + '/claude/step4',
             saveRecord: window.API_BASE + '/claude/save-record',
-            cardQuery:  window.API_BASE + '/claude/card-query'
+            cardQuery:  window.API_BASE + '/claude/card-query',
+            stock:      window.API_BASE + '/claude/stock'
         };
 
         const flow = {
@@ -636,6 +676,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof initLanguage === 'function') initLanguage();
             attachRipples();
+            initStock();
             initActivationFlow();
         });
 
@@ -793,6 +834,75 @@
         }
 
         const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+
+        /* ---------- 实时库存 ---------- */
+        function renderStock(avail, total) {
+            const card = document.getElementById('stockCard');
+            const a = document.getElementById('stockAvail');
+            const t = document.getElementById('stockTotal');
+            const bar = document.getElementById('stockBar');
+            if (!card || !a || !t || !bar) return;
+
+            card.classList.remove('is-loading-skeleton', 'is-low', 'is-out');
+            a.textContent = avail;
+            const hasTotal = (typeof total === 'number' && total > 0);
+            t.textContent = hasTotal ? total : '—';
+
+            const pct = hasTotal ? Math.max(0, Math.min(100, (avail / total) * 100))
+                                 : (avail > 0 ? 100 : 0);
+            bar.style.width = pct + '%';
+
+            if (avail <= 0) card.classList.add('is-out');
+            else if (hasTotal && pct <= 15) card.classList.add('is-low');
+        }
+
+        function firstNum(obj, keys) {
+            if (!obj) return null;
+            for (const k of keys) {
+                const v = obj[k];
+                if (typeof v === 'number' && Number.isFinite(v)) return v;
+                if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+            }
+            return null;
+        }
+
+        async function fetchStock() {
+            const btn = document.getElementById('stockRefresh');
+            const a = document.getElementById('stockAvail');
+            if (!btn || !a) return;
+
+            btn.classList.add('spinning');
+            try {
+                // Worker 仍统一使用 POST；Worker 内部再请求上游 GET /claude/stock。
+                const r = await apiFetch(API.stock, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                if (!r.ok || !isBizSuccess(r.body)) throw new Error(getErrorMessage(r, '库存获取失败'));
+
+                const root = r.body || {};
+                const d = (root && typeof root.data === 'object' && root.data) ? root.data : root;
+                const avail = firstNum(d, ['available', 'avail', 'remaining', 'remain', 'stock', 'left', 'count', 'quantity']);
+                const total = firstNum(d, ['total', 'capacity', 'max', 'quota', 'sum']);
+                if (avail == null) throw new Error('库存返回格式异常');
+                renderStock(avail, total);
+            } catch (err) {
+                console.warn('库存获取失败:', err);
+                a.textContent = '获取失败';
+            } finally {
+                setTimeout(() => btn.classList.remove('spinning'), 500);
+            }
+        }
+
+        function initStock() {
+            const btn = document.getElementById('stockRefresh');
+            if (!btn) return;
+            btn.addEventListener('click', fetchStock);
+            fetchStock();
+            // 和 Grok 前端一致：每 30 秒自动刷新，页面隐藏时跳过。
+            setInterval(() => { if (!document.hidden) fetchStock(); }, 30000);
+        }
 
         /* ---------- 步骤 1 / 2 ---------- */
         function initActivationFlow() {
