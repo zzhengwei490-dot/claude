@@ -589,20 +589,6 @@
                                     <button id="queryCardsBtn" class="btn btn-sm btn-primary" data-loading-text="正在查询" onclick="queryCards()" style="font-size: 0.8125rem;"><span class="btn-label">查询</span></button>
                                 </div>
 
-                                <!-- vip666 首次查询需要人机验证；验证成功后约 2 小时内自动复用 -->
-                                <div id="queryVerifyBox" style="display:none; margin-top:0.75rem; padding:0.85rem; border:1px solid var(--claude-border); border-radius:0.65rem; background:var(--claude-surface);">
-                                    <div style="font-size:0.8125rem; color:var(--claude-text); font-weight:600; margin-bottom:0.55rem;">安全验证</div>
-                                    <div style="font-size:0.75rem; color:var(--claude-text-light); margin-bottom:0.65rem;">首次查询请输入图片验证码；验证通过后正常查询无需每次验证。</div>
-                                    <div style="display:flex; align-items:center; gap:0.65rem; flex-wrap:wrap;">
-                                        <img id="queryVerifyImage" alt="验证码" style="display:none; max-width:180px; min-height:44px; border-radius:0.45rem; border:1px solid var(--claude-border); background:#fff; object-fit:contain;">
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshQueryChallenge()" style="font-size:0.75rem; padding:0.5rem 0.7rem; min-height:auto;">刷新验证码</button>
-                                    </div>
-                                    <div style="display:flex; gap:0.5rem; margin-top:0.65rem; align-items:center;">
-                                        <input id="queryVerifyAnswer" class="form-control" autocomplete="off" inputmode="numeric" placeholder="输入验证码" style="font-size:0.8125rem; padding:0.6rem 0.75rem;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitQueryVerification();}">
-                                        <button id="queryVerifySubmitBtn" type="button" class="btn btn-sm btn-primary" onclick="submitQueryVerification()" style="font-size:0.75rem; padding:0.55rem 0.8rem; min-height:auto; white-space:nowrap;"><span class="btn-label">确认验证</span></button>
-                                    </div>
-                                    <div id="queryVerifyStatus" style="font-size:0.75rem; color:var(--claude-text-light); margin-top:0.5rem;"></div>
-                                </div>
 
                                 <div id="queryResultsContainer" style="display: none; margin-top: 0.75rem;">
                                     <textarea id="queryResultsOutput" class="form-control" rows="4" readonly style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem; background: var(--claude-surface);"></textarea>
@@ -625,39 +611,27 @@
     <script src="/public/js/lang.js?v=20260524006"></script>
     <script>
         // ===================================================================
-        //  双后台：claude.hongyunai.pro + vip666ai.com
-        //  前端只访问 Worker；Worker 自动识别卡密所属后台并统一返回结构。
+        //  单上游：巴别塔666号new
+        //  浏览器只访问 Worker；API Key 与 HMAC 签名全部在 Worker 端处理。
         // ===================================================================
         window.API_BASE = window.API_BASE || 'https://c.zlkjgptplus.org/api/v1';
 
         const API = {
-            step1:             window.API_BASE + '/claude/step1',
-            step2:             window.API_BASE + '/claude/step2',
-            step3:             window.API_BASE + '/claude/step3',
-            step4:             window.API_BASE + '/claude/step4',
-            saveRecord:        window.API_BASE + '/claude/save-record',
-            cardQuery:         window.API_BASE + '/claude/card-query',
-            cardQueryChallenge: window.API_BASE + '/claude/card-query-challenge',
-            cardQueryVerify:    window.API_BASE + '/claude/card-query-verify'
+            step1:      window.API_BASE + '/claude/step1',
+            step2:      window.API_BASE + '/claude/step2',
+            step3:      window.API_BASE + '/claude/step3',
+            step4:      window.API_BASE + '/claude/step4',
+            saveRecord: window.API_BASE + '/claude/save-record',
+            cardQuery:  window.API_BASE + '/claude/card-query'
         };
 
         const flow = {
             cdk: '',
             claudeUserId: '',
             productName: '',
-            orderNo: '',
-            provider: '',
-            pollToken: ''
+            orderNo: ''
         };
         let rechargeDone = false;
-
-        // vip666 卡密查询的人机验证状态。验证一次后，上游默认记住约 2 小时。
-        const QUERY_SESSION_STORAGE_KEY = 'vip666_query_session_v2';
-        const queryVerifyState = {
-            challengeId: '',
-            challengeToken: '',
-            pendingCodes: []
-        };
 
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof initLanguage === 'function') initLanguage();
@@ -672,8 +646,7 @@
             if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
             opts.headers = headers;
 
-            // 防止网络/上游异常时按钮永久停在 loading。默认 20 秒自动恢复。
-            const timeoutMs = Number(opts.timeoutMs || 20000);
+            const timeoutMs = Number(opts.timeoutMs || 25000);
             delete opts.timeoutMs;
             const controller = new AbortController();
             const externalSignal = opts.signal;
@@ -776,7 +749,6 @@
                 btn.classList.remove('is-loading');
                 btn.disabled = false;
                 btn.removeAttribute('aria-busy');
-                // 如果业务代码已经把按钮改成“重新兑换”等成功文案，则保留业务文案。
                 if (label && btn.dataset.originalLabel && label.textContent.trim() === (btn.dataset.activeLoadingLabel || '')) {
                     label.textContent = btn.dataset.originalLabel;
                 }
@@ -812,7 +784,6 @@
 
         function formatTime(v) {
             if (!v) return '';
-            // 新后台返回的 usedTime 可能是 "YYYY-MM-DD HH:mm:ss"，这种格式直接显示最稳妥。
             if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?$/.test(String(v))) return String(v);
             const d = new Date(v);
             if (isNaN(d.getTime())) return String(v);
@@ -829,7 +800,6 @@
             const bindForm = document.getElementById('bindForm');
             const startBtn = document.getElementById('startRechargeBtn');
 
-            // Worker 会根据卡密自动选择 HongYun / vip666ai。
             if (actForm) actForm.addEventListener('submit', async function (e) {
                 e.preventDefault();
                 const btn = actForm.querySelector('button[type=submit]');
@@ -850,7 +820,6 @@
                     const d = b.data || {};
 
                     if (!r.ok || !isBizSuccess(b)) {
-                        // 截图中的已使用返回 code=1002，并在 data 中带 productName / usedTime / email 等信息。
                         let extra = '';
                         if (d.productName) extra += ' · ' + escapeHtml(d.productName);
                         if (d.usedTime) extra += ' · 使用时间：' + escapeHtml(formatTime(d.usedTime));
@@ -861,10 +830,8 @@
                     }
 
                     flow.cdk = cdk;
-                    flow.productName = d.productName || d.product_name || d.planName || d.product || 'Claude Pro';
+                    flow.productName = d.productName || d.planName || d.planType || 'Claude Pro';
                     flow.orderNo = '';
-                    flow.provider = d.provider || b.provider || '';
-                    flow.pollToken = '';
 
                     const info = document.getElementById('cardInfo');
                     if (info) info.textContent = '套餐：' + flow.productName;
@@ -876,7 +843,6 @@
                 }
             });
 
-            // 本地先做 UUID 格式校验；HongYun 会继续预检，vip666ai 在 redeem 阶段完成校验。
             if (bindForm) bindForm.addEventListener('submit', function (e) {
                 e.preventDefault();
                 const uid = (document.getElementById('claudeUserId').value || '').trim();
@@ -895,7 +861,7 @@
             });
         }
 
-        /* ---------- 双后台统一充值链：step2 -> step3 -> step4 轮询 -> saveRecord ---------- */
+        /* ---------- 单上游充值链：step2 -> step3 -> step4 轮询 ---------- */
         async function runRedeem() {
             const btn = document.getElementById('startRechargeBtn');
             if (!flow.cdk || !flow.claudeUserId) {
@@ -907,57 +873,50 @@
             btn.classList.remove('btn-cta-pulse');
 
             try {
-                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在验证 Claude 账号…');
+                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在校验 Claude 用户 ID…');
 
                 const r2 = await apiFetch(API.step2, {
                     method: 'POST',
                     body: JSON.stringify({
                         organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk,
-                        provider: flow.provider
+                        serialNumber: flow.cdk
                     })
                 });
                 if (!r2.ok || !isBizSuccess(r2.body)) {
                     throw new Error(getErrorMessage(r2, '账号校验失败'));
                 }
 
-                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>账号验证通过，正在生成充值订单…');
+                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>校验通过，正在创建充值任务…');
 
                 const r3 = await apiFetch(API.step3, {
                     method: 'POST',
                     body: JSON.stringify({
                         organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk,
-                        provider: flow.provider,
-                        recharge_mode: 'claude_org',
-                        confirm_overwrite: false
+                        serialNumber: flow.cdk
                     })
                 });
                 if (!r3.ok || !isBizSuccess(r3.body)) {
-                    throw new Error(getErrorMessage(r3, '生成订单失败'));
+                    throw new Error(getErrorMessage(r3, '创建充值任务失败'));
                 }
 
                 const b3 = r3.body || {};
                 const d3 = b3.data || {};
-                const orderNo = d3.orderNo || d3.order_no || b3.orderNo || b3.order_no || '';
-                if (!orderNo) throw new Error('生成订单成功，但接口未返回 orderNo');
+                const orderNo = d3.orderNo || d3.order_no || d3.taskId || d3.task_id || '';
+                if (!orderNo) throw new Error('任务创建成功，但接口未返回 taskId');
 
                 flow.orderNo = String(orderNo);
-                flow.provider = d3.provider || flow.provider || b3.provider || '';
-                flow.pollToken = d3.pollToken || d3.poll_token || b3.pollToken || b3.poll_token || '';
+                if (d3.productName) flow.productName = d3.productName;
+
                 const fin = await pollOrderResult(flow.orderNo);
 
                 if (fin.ok) {
-                    // 与新后台原页面一致：step4 成功后调用 saveRecord。
-                    const saved = await saveUsageRecord();
-                    const recordTip = saved ? '' : '<br><span style="font-size:.78rem;opacity:.8;">充值已成功，但本地使用记录同步暂未确认。</span>';
-
+                    await saveUsageRecord();
                     showMsg('step3-result', 'success',
                         '<strong>✅ 充值成功!</strong>' +
                         '<div style="margin-top:.45rem;font-size:.85rem;">' +
                         '套餐：' + escapeHtml(flow.productName || 'Claude Pro') + '<br>' +
                         '账号：' + escapeHtml(flow.claudeUserId) + '<br>' +
-                        '订单号：' + escapeHtml(flow.orderNo) + recordTip +
+                        '任务号：' + escapeHtml(flow.orderNo) +
                         '</div>');
 
                     rechargeDone = true;
@@ -968,10 +927,10 @@
                 }
 
                 if (fin.failed) {
-                    showMsg('step3-result', 'error', '❌ 发货失败：' + escapeHtml(fin.reason || '订单状态为失败') + '。');
+                    showMsg('step3-result', 'error', '❌ 充值失败：' + escapeHtml(fin.reason || '任务状态为失败') + '。');
                 } else {
                     showMsg('step3-result', 'error',
-                        '⌛ 订单仍在处理中，75 秒内未确认完成。订单号：' + escapeHtml(flow.orderNo) +
+                        '⌛ 任务仍在处理中，3 分钟内未确认完成。任务号：' + escapeHtml(flow.orderNo) +
                         '。请稍后用卡密查询功能确认，或联系客服核对。');
                 }
             } catch (err) {
@@ -982,22 +941,18 @@
         }
 
         async function pollOrderResult(orderNo) {
-            const maxPolls = 25;
+            const maxPolls = 60;
             const interval = 3000;
             let lastError = '';
 
             for (let i = 1; i <= maxPolls; i++) {
                 showMsg('step3-result', 'info',
-                    '<span class="spinner-border spinner-border-sm me-2"></span>系统正在极速发货，请勿关闭页面…（' + i + '/' + maxPolls + '）');
+                    '<span class="spinner-border spinner-border-sm me-2"></span>系统正在充值，请勿关闭页面…（' + i + '/' + maxPolls + '）');
 
                 try {
                     const r = await apiFetch(API.step4, {
                         method: 'POST',
-                        body: JSON.stringify({
-                            orderNo: orderNo,
-                            provider: flow.provider,
-                            pollToken: flow.pollToken
-                        })
+                        body: JSON.stringify({ orderNo: orderNo })
                     });
                     const b = r.body || {};
                     const d = b.data || {};
@@ -1005,9 +960,9 @@
 
                     if (isBizSuccess(b) && status === 2) return { ok: true, body: b };
                     if (status === 3) {
-                        return { failed: true, reason: b.msg || b.message || '发货失败', body: b };
+                        return { failed: true, reason: d.message || b.msg || b.message || '充值失败', body: b };
                     }
-                    if (!r.ok) lastError = getErrorMessage(r, '查询订单状态失败');
+                    if (!r.ok) lastError = getErrorMessage(r, '查询任务状态失败');
                 } catch (err) {
                     lastError = err.message;
                 }
@@ -1018,23 +973,18 @@
         }
 
         async function saveUsageRecord() {
-            for (let i = 0; i < 3; i++) {
-                try {
-                    const r = await apiFetch(API.saveRecord, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            serialNumber: flow.cdk,
-                            organizationId: flow.claudeUserId,
-                            provider: flow.provider,
-                            pollToken: flow.pollToken
-                        })
-                    });
-                    // saveRecord 的原页面没有检查业务 code；HTTP 可达即视为已提交。
-                    if (r.ok) return true;
-                } catch (e) { /* 重试 */ }
-                if (i < 2) await sleep(800);
+            try {
+                const r = await apiFetch(API.saveRecord, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        serialNumber: flow.cdk,
+                        organizationId: flow.claudeUserId
+                    })
+                });
+                return r.ok;
+            } catch (e) {
+                return false;
             }
-            return false;
         }
 
         function resetFlow() {
@@ -1043,8 +993,6 @@
             flow.claudeUserId = '';
             flow.productName = '';
             flow.orderNo = '';
-            flow.provider = '';
-            flow.pollToken = '';
 
             const cc = document.getElementById('cardCode');
             const cu = document.getElementById('claudeUserId');
@@ -1068,7 +1016,7 @@
             }
         }
 
-        /* ---------- 卡密查询：Worker 自动识别双后台；vip666 使用 query-batch ---------- */
+        /* ---------- 卡密查询：统一走巴别塔666号new /cdk/info-batch ---------- */
         function toggleQuerySection() {
             const section = document.getElementById('querySection');
             const icon = document.getElementById('queryToggleIcon');
@@ -1088,166 +1036,14 @@
             const productName = item.productName || item.product_name || item.planName || item.plan_name || '';
             if (productName) line += ' · ' + productName;
 
-            // vip666 query-batch 会返回 AccountID / 开通时间；兼容不同字段命名。
-            const orgId = item.organizationId || item.organization_id || item.accountId || item.account_id ||
-                item.orgId || item.org_id || item.targetAccountId || item.target_account_id || '';
+            const orgId = item.organizationId || item.organization_id || item.accountId || item.account_id || '';
             if (orgId) line += ' · 组织ID：' + orgId;
 
             const rechargeTime = item.usedTime || item.used_time || item.usedAt || item.used_at ||
-                item.redeemedAt || item.redeemed_at || item.activatedAt || item.activated_at ||
-                item.completedAt || item.completed_at || item.openTime || item.open_time || '';
+                item.redeemedAt || item.redeemed_at || item.completedAt || item.completed_at || '';
             if (rechargeTime) line += ' · 充值时间：' + formatTime(rechargeTime);
 
             return line;
-        }
-
-        function getStoredQuerySessionToken() {
-            try {
-                const raw = localStorage.getItem(QUERY_SESSION_STORAGE_KEY);
-                if (!raw) return '';
-                const saved = JSON.parse(raw);
-                if (!saved || !saved.token) return '';
-                if (saved.expiresAt && Date.now() >= Number(saved.expiresAt)) {
-                    localStorage.removeItem(QUERY_SESSION_STORAGE_KEY);
-                    return '';
-                }
-                return String(saved.token);
-            } catch (e) {
-                return '';
-            }
-        }
-
-        function saveQuerySessionToken(token, rememberSeconds) {
-            try {
-                const seconds = Math.max(60, Number(rememberSeconds || 7200));
-                localStorage.setItem(QUERY_SESSION_STORAGE_KEY, JSON.stringify({
-                    token: String(token || ''),
-                    expiresAt: Date.now() + seconds * 1000 - 5000
-                }));
-            } catch (e) { /* localStorage 不可用时仅本次页面有效 */ }
-        }
-
-        function clearQuerySessionToken() {
-            try { localStorage.removeItem(QUERY_SESSION_STORAGE_KEY); } catch (e) {}
-        }
-
-        function isQueryVerificationRequired(r) {
-            const b = r && r.body ? r.body : {};
-            const d = b && b.data && typeof b.data === 'object' ? b.data : {};
-            return Number(r && r.status) === 428 || d.needVerification === true || b.needVerification === true;
-        }
-
-        function hideQueryVerifyBox() {
-            const box = document.getElementById('queryVerifyBox');
-            if (box) box.style.display = 'none';
-            const answer = document.getElementById('queryVerifyAnswer');
-            if (answer) answer.value = '';
-        }
-
-        async function beginQueryVerification(codes) {
-            const box = document.getElementById('queryVerifyBox');
-            const img = document.getElementById('queryVerifyImage');
-            const status = document.getElementById('queryVerifyStatus');
-            const answer = document.getElementById('queryVerifyAnswer');
-
-            queryVerifyState.pendingCodes = Array.isArray(codes) ? codes.slice() : [];
-            queryVerifyState.challengeId = '';
-            queryVerifyState.challengeToken = '';
-
-            if (box) box.style.display = 'block';
-            if (img) { img.style.display = 'none'; img.removeAttribute('src'); }
-            if (status) status.textContent = '正在获取验证码…';
-            if (answer) answer.value = '';
-
-            try {
-                const r = await apiFetch(API.cardQueryChallenge, {
-                    method: 'POST',
-                    body: JSON.stringify({})
-                });
-                const b = r.body || {};
-                const d = b.data || {};
-                if (!r.ok || !isBizSuccess(b) || !d.challengeToken || !d.challengeId || !d.image) {
-                    if (status) status.textContent = '验证码获取失败：' + getErrorMessage(r, '上游未返回完整验证码数据');
-                    return false;
-                }
-
-                queryVerifyState.challengeId = String(d.challengeId);
-                queryVerifyState.challengeToken = String(d.challengeToken);
-                if (img) {
-                    img.src = String(d.image);
-                    img.style.display = 'block';
-                }
-                if (status) status.textContent = '请输入图片中的验证码，然后点击“确认验证”。';
-                if (answer) {
-                    try { answer.focus(); } catch (e) {}
-                }
-                return true;
-            } catch (e) {
-                if (status) status.textContent = '验证码获取失败：网络连接错误';
-                return false;
-            }
-        }
-
-        async function refreshQueryChallenge() {
-            const codes = queryVerifyState.pendingCodes.length
-                ? queryVerifyState.pendingCodes
-                : document.getElementById('queryCodesInput').value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
-            if (!codes.length) return;
-            await beginQueryVerification(codes);
-        }
-
-        async function submitQueryVerification() {
-            const answerInput = document.getElementById('queryVerifyAnswer');
-            const status = document.getElementById('queryVerifyStatus');
-            const btn = document.getElementById('queryVerifySubmitBtn');
-            const answer = answerInput ? answerInput.value.trim() : '';
-
-            if (!queryVerifyState.challengeId || !queryVerifyState.challengeToken) {
-                if (status) status.textContent = '验证码已失效，请刷新验证码。';
-                return;
-            }
-            if (!answer) {
-                if (status) status.textContent = '请输入验证码。';
-                if (answerInput) answerInput.focus();
-                return;
-            }
-
-            setBtnLoading(btn, true, '正在验证');
-            if (status) status.textContent = '正在验证…';
-
-            try {
-                const r = await apiFetch(API.cardQueryVerify, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        challengeId: queryVerifyState.challengeId,
-                        challengeToken: queryVerifyState.challengeToken,
-                        answer: answer
-                    })
-                });
-                const b = r.body || {};
-                const d = b.data || {};
-
-                if (!r.ok || !isBizSuccess(b) || d.verified !== true || !d.querySessionToken) {
-                    if (status) status.textContent = '验证失败：' + getErrorMessage(r, '验证码错误或已过期');
-                    if (answerInput) {
-                        answerInput.value = '';
-                        try { answerInput.focus(); } catch (e) {}
-                    }
-                    return;
-                }
-
-                saveQuerySessionToken(d.querySessionToken, d.rememberSeconds || d.remember_seconds || 7200);
-                if (status) status.textContent = '验证成功，正在继续查询…';
-                const pending = queryVerifyState.pendingCodes.slice();
-                hideQueryVerifyBox();
-                queryVerifyState.challengeId = '';
-                queryVerifyState.challengeToken = '';
-                await queryCards(pending);
-            } catch (e) {
-                if (status) status.textContent = '验证失败：网络连接错误';
-            } finally {
-                setBtnLoading(btn, false);
-            }
         }
 
         async function queryCards(codesOverride) {
@@ -1265,31 +1061,17 @@
             out.value = '查询中…';
 
             try {
-                const querySessionToken = getStoredQuerySessionToken();
                 const r = await apiFetch(API.cardQuery, {
                     method: 'POST',
-                    body: JSON.stringify({
-                        codes: codes,
-                        querySessionToken: querySessionToken
-                    })
+                    body: JSON.stringify({ codes: codes })
                 });
                 const b = r.body || {};
-
-                if (isQueryVerificationRequired(r)) {
-                    clearQuerySessionToken();
-                    // 需要安全验证时只显示验证码区域，不显示下面的查询结果框。
-                    container.style.display = 'none';
-                    out.value = '';
-                    await beginQueryVerification(codes);
-                    return;
-                }
 
                 if (!r.ok || !isBizSuccess(b) || !Array.isArray(b.data)) {
                     out.value = '查询失败：' + getErrorMessage(r, '上游接口异常或卡密格式错误');
                     return;
                 }
 
-                hideQueryVerifyBox();
                 out.value = b.data.map(formatCardQueryItem).join('\n') || '未查询到结果';
             } catch (e) {
                 out.value = '查询失败：' + (e && e.message ? e.message : '网络连接错误');
@@ -1297,7 +1079,6 @@
                 setBtnLoading(btn, false);
             }
         }
-
     </script>
 </body>
 </html>
