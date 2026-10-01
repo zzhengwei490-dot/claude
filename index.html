@@ -138,27 +138,6 @@
         .alert { border: 1px solid; border-radius: 12px; padding: 1rem 1.25rem; font-size: 0.9375rem; }
         .alert-success { background: #F0FDF4; border-color: #BBF7D0; color: #166534; }
 
-        /* ============ 实时库存组件（沿用 Grok 前端布局，Claude 配色） ============ */
-        .stock-card { margin-top: 1rem; padding: 0.85rem 1rem; background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 14px; }
-        .stock-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-        .stock-live { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; font-weight: 700; color: var(--claude-text-light); letter-spacing: 0.02em; }
-        .stock-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--claude-success); position: relative; }
-        .stock-live-dot::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--claude-success); opacity: 0; animation: stockPing 1.8s ease-out infinite; }
-        @keyframes stockPing { 0% { transform: scale(0.6); opacity: 0.6; } 80%, 100% { transform: scale(1.6); opacity: 0; } }
-        @keyframes stockSpin { to { transform: rotate(360deg); } }
-        .stock-num { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--claude-text); font-size: 1.05rem; }
-        .stock-num small { font-weight: 600; color: var(--claude-text-light); font-size: 0.72rem; }
-        .stock-bar { margin-top: 0.6rem; height: 8px; border-radius: 999px; background: var(--claude-surface); overflow: hidden; border: 1px solid var(--claude-border); }
-        .stock-bar-fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #22C55E, #16A34A); transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
-        .stock-card.is-low .stock-live-dot, .stock-card.is-low .stock-live-dot::after { background: var(--claude-warning); border-color: var(--claude-warning); }
-        .stock-card.is-low .stock-bar-fill { background: linear-gradient(90deg, #F59E0B, #D97706); }
-        .stock-card.is-out .stock-live-dot, .stock-card.is-out .stock-live-dot::after { background: var(--claude-danger); border-color: var(--claude-danger); }
-        .stock-card.is-out .stock-bar-fill { background: var(--claude-danger); }
-        .stock-card.is-loading-skeleton .stock-num { color: var(--claude-border); }
-        .stock-refresh { background: none; border: none; padding: 0.15rem; color: var(--claude-text-light); cursor: pointer; line-height: 1; border-radius: 6px; transition: transform 0.4s ease, color 0.2s ease; }
-        .stock-refresh:hover { color: var(--claude-text); }
-        .stock-refresh.spinning { animation: stockSpin 0.7s linear infinite; }
-
         .progress { border-radius: 12px; background: var(--claude-border); height: 8px; }
         .progress-bar { border-radius: 12px; background: var(--claude-primary); transition: width 0.3s ease; }
 
@@ -506,25 +485,7 @@
                                     <span class="price-tag-meta">Standard</span>
                                 </div>
                             </div>
-
-                            <!-- ===== 实时库存 ===== -->
-                            <div class="stock-card is-loading-skeleton" id="stockCard">
-                                <div class="stock-top">
-                                    <span class="stock-live">
-                                        <span class="stock-live-dot"></span>
-                                        <span>实时库存</span>
-                                    </span>
-                                    <span style="display:flex; align-items:center; gap:0.5rem;">
-                                        <span class="stock-num"><span id="stockAvail">—</span><small> / <span id="stockTotal">—</span></small></span>
-                                        <button class="stock-refresh" id="stockRefresh" type="button" aria-label="刷新库存" title="刷新">
-                                            <i class="bi bi-arrow-clockwise"></i>
-                                        </button>
-                                    </span>
-                                </div>
-                                <div class="stock-bar"><div class="stock-bar-fill" id="stockBar"></div></div>
-                            </div>
-
-                            <div class="row g-2 mb-3 trust-features" style="margin-top: 1rem;">
+                            <div class="row g-2 mb-3 trust-features">
                                 <div class="col-4">
                                     <div class="text-center" style="padding: 0.75rem 0.5rem; background: var(--claude-surface); border-radius: 8px; border: 1px solid var(--claude-border);">
                                         <div style="font-size: 1.5rem; margin-bottom: 0.5rem;"><i class="bi bi-shield-check"></i></div>
@@ -627,8 +588,6 @@
                                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                                     <button id="queryCardsBtn" class="btn btn-sm btn-primary" data-loading-text="正在查询" onclick="queryCards()" style="font-size: 0.8125rem;"><span class="btn-label">查询</span></button>
                                 </div>
-
-
                                 <div id="queryResultsContainer" style="display: none; margin-top: 0.75rem;">
                                     <textarea id="queryResultsOutput" class="form-control" rows="4" readonly style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem; background: var(--claude-surface);"></textarea>
                                 </div>
@@ -650,10 +609,10 @@
     <script src="/public/js/lang.js?v=20260524006"></script>
     <script>
         // ===================================================================
-        //  单上游：巴别塔666号new
-        //  浏览器只访问 Worker；API Key 与 HMAC 签名全部在 Worker 端处理。
+        //  双后台：claude.hongyunai.pro + vip666ai.com
+        //  前端只访问 Worker；Worker 自动识别卡密所属后台并统一返回结构。
         // ===================================================================
-        window.API_BASE = window.API_BASE || 'https://c.zlkjgptplus.org/api/v1';
+        window.API_BASE = window.API_BASE || 'https://c.zlkjai.org/api/v1';
 
         const API = {
             step1:      window.API_BASE + '/claude/step1',
@@ -661,22 +620,22 @@
             step3:      window.API_BASE + '/claude/step3',
             step4:      window.API_BASE + '/claude/step4',
             saveRecord: window.API_BASE + '/claude/save-record',
-            cardQuery:  window.API_BASE + '/claude/card-query',
-            stock:      window.API_BASE + '/claude/stock'
+            cardQuery:  window.API_BASE + '/claude/card-query'
         };
 
         const flow = {
             cdk: '',
             claudeUserId: '',
             productName: '',
-            orderNo: ''
+            orderNo: '',
+            provider: '',
+            pollToken: ''
         };
         let rechargeDone = false;
 
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof initLanguage === 'function') initLanguage();
             attachRipples();
-            initStock();
             initActivationFlow();
         });
 
@@ -687,7 +646,8 @@
             if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
             opts.headers = headers;
 
-            const timeoutMs = Number(opts.timeoutMs || 25000);
+            // 防止网络/上游异常时按钮永久停在 loading。默认 20 秒自动恢复。
+            const timeoutMs = Number(opts.timeoutMs || 20000);
             delete opts.timeoutMs;
             const controller = new AbortController();
             const externalSignal = opts.signal;
@@ -790,6 +750,7 @@
                 btn.classList.remove('is-loading');
                 btn.disabled = false;
                 btn.removeAttribute('aria-busy');
+                // 如果业务代码已经把按钮改成“重新兑换”等成功文案，则保留业务文案。
                 if (label && btn.dataset.originalLabel && label.textContent.trim() === (btn.dataset.activeLoadingLabel || '')) {
                     label.textContent = btn.dataset.originalLabel;
                 }
@@ -825,6 +786,7 @@
 
         function formatTime(v) {
             if (!v) return '';
+            // 新后台返回的 usedTime 可能是 "YYYY-MM-DD HH:mm:ss"，这种格式直接显示最稳妥。
             if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?$/.test(String(v))) return String(v);
             const d = new Date(v);
             if (isNaN(d.getTime())) return String(v);
@@ -835,81 +797,13 @@
 
         const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-
-        /* ---------- 实时库存 ---------- */
-        function renderStock(avail, total) {
-            const card = document.getElementById('stockCard');
-            const a = document.getElementById('stockAvail');
-            const t = document.getElementById('stockTotal');
-            const bar = document.getElementById('stockBar');
-            if (!card || !a || !t || !bar) return;
-
-            card.classList.remove('is-loading-skeleton', 'is-low', 'is-out');
-            a.textContent = avail;
-            const hasTotal = (typeof total === 'number' && total > 0);
-            t.textContent = hasTotal ? total : '—';
-
-            const pct = hasTotal ? Math.max(0, Math.min(100, (avail / total) * 100))
-                                 : (avail > 0 ? 100 : 0);
-            bar.style.width = pct + '%';
-
-            if (avail <= 0) card.classList.add('is-out');
-            else if (hasTotal && pct <= 15) card.classList.add('is-low');
-        }
-
-        function firstNum(obj, keys) {
-            if (!obj) return null;
-            for (const k of keys) {
-                const v = obj[k];
-                if (typeof v === 'number' && Number.isFinite(v)) return v;
-                if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
-            }
-            return null;
-        }
-
-        async function fetchStock() {
-            const btn = document.getElementById('stockRefresh');
-            const a = document.getElementById('stockAvail');
-            if (!btn || !a) return;
-
-            btn.classList.add('spinning');
-            try {
-                // Worker 仍统一使用 POST；Worker 内部再请求上游 GET /claude/stock。
-                const r = await apiFetch(API.stock, {
-                    method: 'POST',
-                    body: JSON.stringify({})
-                });
-                if (!r.ok || !isBizSuccess(r.body)) throw new Error(getErrorMessage(r, '库存获取失败'));
-
-                const root = r.body || {};
-                const d = (root && typeof root.data === 'object' && root.data) ? root.data : root;
-                const avail = firstNum(d, ['available', 'avail', 'remaining', 'remain', 'stock', 'left', 'count', 'quantity']);
-                const total = firstNum(d, ['total', 'capacity', 'max', 'quota', 'sum']);
-                if (avail == null) throw new Error('库存返回格式异常');
-                renderStock(avail, total);
-            } catch (err) {
-                console.warn('库存获取失败:', err);
-                a.textContent = '获取失败';
-            } finally {
-                setTimeout(() => btn.classList.remove('spinning'), 500);
-            }
-        }
-
-        function initStock() {
-            const btn = document.getElementById('stockRefresh');
-            if (!btn) return;
-            btn.addEventListener('click', fetchStock);
-            fetchStock();
-            // 和 Grok 前端一致：每 30 秒自动刷新，页面隐藏时跳过。
-            setInterval(() => { if (!document.hidden) fetchStock(); }, 30000);
-        }
-
         /* ---------- 步骤 1 / 2 ---------- */
         function initActivationFlow() {
             const actForm = document.getElementById('activateForm');
             const bindForm = document.getElementById('bindForm');
             const startBtn = document.getElementById('startRechargeBtn');
 
+            // Worker 会根据卡密自动选择 HongYun / vip666ai。
             if (actForm) actForm.addEventListener('submit', async function (e) {
                 e.preventDefault();
                 const btn = actForm.querySelector('button[type=submit]');
@@ -930,6 +824,7 @@
                     const d = b.data || {};
 
                     if (!r.ok || !isBizSuccess(b)) {
+                        // 截图中的已使用返回 code=1002，并在 data 中带 productName / usedTime / email 等信息。
                         let extra = '';
                         if (d.productName) extra += ' · ' + escapeHtml(d.productName);
                         if (d.usedTime) extra += ' · 使用时间：' + escapeHtml(formatTime(d.usedTime));
@@ -940,8 +835,10 @@
                     }
 
                     flow.cdk = cdk;
-                    flow.productName = d.productName || d.planName || d.planType || 'Claude Pro';
+                    flow.productName = d.productName || d.product_name || d.planName || d.product || 'Claude Pro';
                     flow.orderNo = '';
+                    flow.provider = d.provider || b.provider || '';
+                    flow.pollToken = '';
 
                     const info = document.getElementById('cardInfo');
                     if (info) info.textContent = '套餐：' + flow.productName;
@@ -953,6 +850,7 @@
                 }
             });
 
+            // 本地先做 UUID 格式校验；HongYun 会继续预检，vip666ai 在 redeem 阶段完成校验。
             if (bindForm) bindForm.addEventListener('submit', function (e) {
                 e.preventDefault();
                 const uid = (document.getElementById('claudeUserId').value || '').trim();
@@ -971,7 +869,7 @@
             });
         }
 
-        /* ---------- 单上游充值链：step2 -> step3 -> step4 轮询 ---------- */
+        /* ---------- 双后台统一充值链：step2 -> step3 -> step4 轮询 -> saveRecord ---------- */
         async function runRedeem() {
             const btn = document.getElementById('startRechargeBtn');
             if (!flow.cdk || !flow.claudeUserId) {
@@ -983,50 +881,57 @@
             btn.classList.remove('btn-cta-pulse');
 
             try {
-                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在校验 Claude 用户 ID…');
+                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在验证 Claude 账号…');
 
                 const r2 = await apiFetch(API.step2, {
                     method: 'POST',
                     body: JSON.stringify({
                         organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk
+                        serialNumber: flow.cdk,
+                        provider: flow.provider
                     })
                 });
                 if (!r2.ok || !isBizSuccess(r2.body)) {
                     throw new Error(getErrorMessage(r2, '账号校验失败'));
                 }
 
-                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>校验通过，正在创建充值任务…');
+                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>账号验证通过，正在生成充值订单…');
 
                 const r3 = await apiFetch(API.step3, {
                     method: 'POST',
                     body: JSON.stringify({
                         organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk
+                        serialNumber: flow.cdk,
+                        provider: flow.provider,
+                        recharge_mode: 'claude_org',
+                        confirm_overwrite: false
                     })
                 });
                 if (!r3.ok || !isBizSuccess(r3.body)) {
-                    throw new Error(getErrorMessage(r3, '创建充值任务失败'));
+                    throw new Error(getErrorMessage(r3, '生成订单失败'));
                 }
 
                 const b3 = r3.body || {};
                 const d3 = b3.data || {};
-                const orderNo = d3.orderNo || d3.order_no || d3.taskId || d3.task_id || '';
-                if (!orderNo) throw new Error('任务创建成功，但接口未返回 taskId');
+                const orderNo = d3.orderNo || d3.order_no || b3.orderNo || b3.order_no || '';
+                if (!orderNo) throw new Error('生成订单成功，但接口未返回 orderNo');
 
                 flow.orderNo = String(orderNo);
-                if (d3.productName) flow.productName = d3.productName;
-
+                flow.provider = d3.provider || flow.provider || b3.provider || '';
+                flow.pollToken = d3.pollToken || d3.poll_token || b3.pollToken || b3.poll_token || '';
                 const fin = await pollOrderResult(flow.orderNo);
 
                 if (fin.ok) {
-                    await saveUsageRecord();
+                    // 与新后台原页面一致：step4 成功后调用 saveRecord。
+                    const saved = await saveUsageRecord();
+                    const recordTip = saved ? '' : '<br><span style="font-size:.78rem;opacity:.8;">充值已成功，但本地使用记录同步暂未确认。</span>';
+
                     showMsg('step3-result', 'success',
                         '<strong>✅ 充值成功!</strong>' +
                         '<div style="margin-top:.45rem;font-size:.85rem;">' +
                         '套餐：' + escapeHtml(flow.productName || 'Claude Pro') + '<br>' +
                         '账号：' + escapeHtml(flow.claudeUserId) + '<br>' +
-                        '任务号：' + escapeHtml(flow.orderNo) +
+                        '订单号：' + escapeHtml(flow.orderNo) + recordTip +
                         '</div>');
 
                     rechargeDone = true;
@@ -1037,10 +942,10 @@
                 }
 
                 if (fin.failed) {
-                    showMsg('step3-result', 'error', '❌ 充值失败：' + escapeHtml(fin.reason || '任务状态为失败') + '。');
+                    showMsg('step3-result', 'error', '❌ 发货失败：' + escapeHtml(fin.reason || '订单状态为失败') + '。');
                 } else {
                     showMsg('step3-result', 'error',
-                        '⌛ 任务仍在处理中，3 分钟内未确认完成。任务号：' + escapeHtml(flow.orderNo) +
+                        '⌛ 订单仍在处理中，75 秒内未确认完成。订单号：' + escapeHtml(flow.orderNo) +
                         '。请稍后用卡密查询功能确认，或联系客服核对。');
                 }
             } catch (err) {
@@ -1051,18 +956,22 @@
         }
 
         async function pollOrderResult(orderNo) {
-            const maxPolls = 60;
+            const maxPolls = 25;
             const interval = 3000;
             let lastError = '';
 
             for (let i = 1; i <= maxPolls; i++) {
                 showMsg('step3-result', 'info',
-                    '<span class="spinner-border spinner-border-sm me-2"></span>系统正在充值，请勿关闭页面…（' + i + '/' + maxPolls + '）');
+                    '<span class="spinner-border spinner-border-sm me-2"></span>系统正在极速发货，请勿关闭页面…（' + i + '/' + maxPolls + '）');
 
                 try {
                     const r = await apiFetch(API.step4, {
                         method: 'POST',
-                        body: JSON.stringify({ orderNo: orderNo })
+                        body: JSON.stringify({
+                            orderNo: orderNo,
+                            provider: flow.provider,
+                            pollToken: flow.pollToken
+                        })
                     });
                     const b = r.body || {};
                     const d = b.data || {};
@@ -1070,9 +979,9 @@
 
                     if (isBizSuccess(b) && status === 2) return { ok: true, body: b };
                     if (status === 3) {
-                        return { failed: true, reason: d.message || b.msg || b.message || '充值失败', body: b };
+                        return { failed: true, reason: b.msg || b.message || '发货失败', body: b };
                     }
-                    if (!r.ok) lastError = getErrorMessage(r, '查询任务状态失败');
+                    if (!r.ok) lastError = getErrorMessage(r, '查询订单状态失败');
                 } catch (err) {
                     lastError = err.message;
                 }
@@ -1083,18 +992,23 @@
         }
 
         async function saveUsageRecord() {
-            try {
-                const r = await apiFetch(API.saveRecord, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        serialNumber: flow.cdk,
-                        organizationId: flow.claudeUserId
-                    })
-                });
-                return r.ok;
-            } catch (e) {
-                return false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    const r = await apiFetch(API.saveRecord, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            serialNumber: flow.cdk,
+                            organizationId: flow.claudeUserId,
+                            provider: flow.provider,
+                            pollToken: flow.pollToken
+                        })
+                    });
+                    // saveRecord 的原页面没有检查业务 code；HTTP 可达即视为已提交。
+                    if (r.ok) return true;
+                } catch (e) { /* 重试 */ }
+                if (i < 2) await sleep(800);
             }
+            return false;
         }
 
         function resetFlow() {
@@ -1103,6 +1017,8 @@
             flow.claudeUserId = '';
             flow.productName = '';
             flow.orderNo = '';
+            flow.provider = '';
+            flow.pollToken = '';
 
             const cc = document.getElementById('cardCode');
             const cu = document.getElementById('claudeUserId');
@@ -1126,7 +1042,7 @@
             }
         }
 
-        /* ---------- 卡密查询：统一走巴别塔666号new /cdk/info-batch ---------- */
+        /* ---------- 卡密查询：Worker 自动识别双后台；vip666 使用 query-batch ---------- */
         function toggleQuerySection() {
             const section = document.getElementById('querySection');
             const icon = document.getElementById('queryToggleIcon');
@@ -1146,24 +1062,25 @@
             const productName = item.productName || item.product_name || item.planName || item.plan_name || '';
             if (productName) line += ' · ' + productName;
 
-            const orgId = item.organizationId || item.organization_id || item.accountId || item.account_id || '';
+            // vip666 query-batch 会返回 AccountID / 开通时间；兼容不同字段命名。
+            const orgId = item.organizationId || item.organization_id || item.accountId || item.account_id ||
+                item.orgId || item.org_id || item.targetAccountId || item.target_account_id || '';
             if (orgId) line += ' · 组织ID：' + orgId;
 
             const rechargeTime = item.usedTime || item.used_time || item.usedAt || item.used_at ||
-                item.redeemedAt || item.redeemed_at || item.completedAt || item.completed_at || '';
+                item.redeemedAt || item.redeemed_at || item.activatedAt || item.activated_at ||
+                item.completedAt || item.completed_at || item.openTime || item.open_time || '';
             if (rechargeTime) line += ' · 充值时间：' + formatTime(rechargeTime);
 
             return line;
         }
 
-        async function queryCards(codesOverride) {
+        async function queryCards() {
             const input = document.getElementById('queryCodesInput');
             const out = document.getElementById('queryResultsOutput');
             const container = document.getElementById('queryResultsContainer');
             const btn = document.getElementById('queryCardsBtn');
-            const codes = Array.isArray(codesOverride) && codesOverride.length
-                ? codesOverride.slice()
-                : input.value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
+            const codes = input.value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
             if (!codes.length) return;
 
             setBtnLoading(btn, true, '正在查询');
@@ -1176,19 +1093,18 @@
                     body: JSON.stringify({ codes: codes })
                 });
                 const b = r.body || {};
-
                 if (!r.ok || !isBizSuccess(b) || !Array.isArray(b.data)) {
                     out.value = '查询失败：' + getErrorMessage(r, '上游接口异常或卡密格式错误');
                     return;
                 }
-
                 out.value = b.data.map(formatCardQueryItem).join('\n') || '未查询到结果';
             } catch (e) {
-                out.value = '查询失败：' + (e && e.message ? e.message : '网络连接错误');
+                out.value = '查询失败：网络连接错误';
             } finally {
                 setBtnLoading(btn, false);
             }
         }
+
     </script>
 </body>
 </html>
