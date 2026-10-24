@@ -27,423 +27,269 @@
             --brand-gradient-soft: linear-gradient(135deg, #FFF8F0 0%, #FBEEDF 100%);
         }
 
-        body {
-            background:
-                radial-gradient(1000px 500px at 50% -200px, rgba(204, 120, 92, 0.05), transparent 70%),
-                var(--claude-bg);
-            background-attachment: fixed;
-            min-height: 100vh;
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-            color: var(--claude-text);
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-
-        .main-container {
-            background: var(--claude-card-bg);
-            border-radius: 24px;
-            box-shadow:
-                0 1px 2px rgba(43, 33, 24, 0.04),
-                0 4px 14px rgba(43, 33, 24, 0.06),
-                0 14px 40px rgba(43, 33, 24, 0.08);
-            padding: 3rem;
-            margin: 2rem 0;
-            max-width: 800px;
-            border: 1px solid var(--claude-border);
-            position: relative;
-            overflow: hidden;
-        }
-        .main-container::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 1px;
-            background: linear-gradient(90deg,
-                transparent 0%,
-                rgba(204, 120, 92, 0.35) 20%,
-                rgba(204, 120, 92, 0.6) 50%,
-                rgba(204, 120, 92, 0.35) 80%,
-                transparent 100%);
-            z-index: 1;
-        }
-
-        .alert-sm { font-size: 0.875rem; border-radius: 12px; }
-
-        .steps-container { background: transparent; border-radius: 12px; padding: 1.25rem 0; margin-bottom: 2rem; }
-        .step-indicator { position: relative; }
-        .step-indicator::before {
-            content: ''; position: absolute; top: 18px; left: 50%; width: 100%; height: 2px;
-            background: var(--claude-border); z-index: 1;
-        }
-        .step-indicator:last-child::before { display: none; }
-        .step-number {
-            width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-            font-weight: 600; font-size: 0.875rem; background: var(--claude-surface); border: 2px solid var(--claude-border);
-            color: var(--claude-text-light); position: relative; z-index: 2; margin: 0 auto 0.5rem; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        .step-number.active { background: var(--brand-gradient); color: white; border-color: var(--claude-primary); box-shadow: 0 4px 12px var(--shadow-primary-strong); transform: scale(1.06); }
-        .step-number.completed { background: var(--claude-success); color: white; border-color: var(--claude-success); }
-        .step-label { font-weight: 500; color: var(--claude-text-light); font-size: 0.75rem; }
-        .step-label.active { color: var(--claude-text); font-weight: 600; }
-
-        .step-card { border: 1px solid var(--claude-border); border-radius: 16px; background: var(--claude-card-bg); transition: all 0.2s ease; overflow: hidden; margin-bottom: 1.5rem; }
-        .step-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
-        .step-card.active { border-color: var(--claude-primary); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1); }
-        .step-card.completed { border-color: var(--claude-success); background: #FAFFF8; }
-        .card-header { border: none; padding: 1.5rem 1.75rem; font-weight: 600; background: transparent; color: var(--claude-text); }
-        .card-body { padding: 0 1.75rem 1.75rem; }
-
-        .form-control { border-radius: 12px; border: 1.5px solid var(--claude-border); padding: 0.875rem 1rem; transition: all 0.2s ease; background: var(--claude-surface); color: var(--claude-text); font-size: 1rem; }
-        .form-control:focus { border-color: var(--claude-primary); box-shadow: 0 0 0 3px var(--shadow-primary); outline: none; }
-        .form-control::placeholder { color: var(--claude-text-light); }
-        .form-control-lg { padding: 1rem 1.25rem; font-size: 1.125rem; }
-        .form-label { font-weight: 500; color: var(--claude-text); margin-bottom: 0.5rem; font-size: 0.9375rem; }
-
-        /* ============ 更生动的按钮（移植自 Grok 页，配色沿用 Claude） ============ */
-        .btn { border-radius: 12px; font-weight: 600; padding: 0.875rem 1.75rem; border: none; font-size: 1rem; position: relative; overflow: hidden; isolation: isolate; transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease, filter 0.2s ease; }
-        .btn-lg { padding: 1.125rem 2rem; font-size: 1.0625rem; }
-
-        .btn-primary { background: var(--brand-gradient); background-size: 200% 200%; color: white; box-shadow: 0 2px 8px var(--shadow-primary), 0 1px 0 rgba(255,255,255,0.12) inset; letter-spacing: 0.01em; }
-        .btn-primary:hover { color: white; transform: translateY(-2px); box-shadow: 0 8px 20px var(--shadow-primary-strong), 0 1px 0 rgba(255,255,255,0.15) inset; filter: brightness(1.04); }
-        .btn-primary:active { transform: translateY(0) scale(0.985); }
-        .btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--shadow-primary), 0 8px 20px var(--shadow-primary-strong); }
-        .btn-primary:disabled { background: var(--claude-text-light); opacity: 0.6; cursor: not-allowed; transform: none; }
-        /* 高光扫过 */
-        .btn-primary::after { content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%; z-index: -1; background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.28) 50%, transparent 100%); transform: skewX(-18deg); transition: left 0.6s ease; }
-        .btn-primary:hover::after { left: 130%; }
-        /* 主 CTA 呼吸 */
-        .btn-cta-pulse { animation: ctaPulse 2.6s ease-in-out infinite; }
-        @keyframes ctaPulse {
-            0%, 100% { box-shadow: 0 2px 8px var(--shadow-primary), 0 1px 0 rgba(255,255,255,0.12) inset; }
-            50% { box-shadow: 0 2px 8px var(--shadow-primary), 0 0 0 6px rgba(204,120,92,0.10), 0 1px 0 rgba(255,255,255,0.12) inset; }
-        }
-
-        .btn-success { background: var(--claude-success); color: white; }
-        .btn-outline-secondary { border: 1.5px solid var(--claude-border); color: var(--claude-text); background: transparent; transition: all 0.2s ease; }
-        .btn-outline-secondary:hover { background: var(--claude-surface); transform: translateY(-1px); }
-
-        /* 点击水波纹 */
-        .ripple { position: absolute; border-radius: 50%; transform: scale(0); background: rgba(255,255,255,0.45); animation: rippleAnim 0.6s linear; pointer-events: none; z-index: 0; }
-        @keyframes rippleAnim { to { transform: scale(4); opacity: 0; } }
-
-        /* 加载态 */
-        .btn.is-loading { pointer-events: none; }
-        .btn.is-loading .btn-label { opacity: 0; }
-        .btn.is-loading::before { content: ''; position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border: 2.5px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: btnSpin 0.7s linear infinite; z-index: 2; }
-        @media (prefers-reduced-motion: reduce) {
-            .btn, .btn-primary::after, .btn-cta-pulse, .step-number { transition: none !important; animation: none !important; }
-        }
-
-        .alert { border: 1px solid; border-radius: 12px; padding: 1rem 1.25rem; font-size: 0.9375rem; }
-        .alert-success { background: #F0FDF4; border-color: #BBF7D0; color: #166534; }
-
-        .progress { border-radius: 12px; background: var(--claude-border); height: 8px; }
-        .progress-bar { border-radius: 12px; background: var(--claude-primary); transition: width 0.3s ease; }
-
-        .status-card { background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 16px; padding: 2rem; margin-top: 2rem; }
-        .footer { text-align: center; padding: 2rem 0; color: var(--claude-text-light); font-size: 0.875rem; }
-
-        @media (max-width: 768px) {
-            .main-container { margin: 0.75rem; padding: 1.5rem 1.25rem; border-radius: 16px; }
-            .btn { width: 100%; padding: 0.75rem 1rem; }
-            #queryCardsBtn { width: auto; }
-        }
-
-        .site-nav-bar { position: fixed; top: 0.85rem; left: 0.85rem; z-index: 1000; display: flex; align-items: center; gap: 0.5rem; max-width: calc(100vw - 1.7rem); }
-        .site-nav-trigger { list-style: none; display: inline-flex; align-items: center; gap: 0.5rem; background: #FFFFFF; border: 1px solid #E8E2D5; border-radius: 999px; padding: 0.45rem 0.85rem 0.45rem 0.5rem; color: #2B2118; font-weight: 600; font-size: 0.8125rem; line-height: 1; box-shadow: 0 2px 8px rgba(43, 33, 24, 0.06); }
-        .site-nav-trigger-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--brand-accent); box-shadow: 0 1px 0 rgba(255,255,255,0.3) inset, 0 0 0 2px rgba(255,255,255,0.6); flex-shrink: 0; }
-
-        .claude-logo { display: inline-flex; align-items: center; gap: 0.625rem; font-size: 1.65rem; font-weight: 700; color: var(--claude-text); }
-        .claude-logo-icon { width: 38px; height: 38px; background: var(--brand-gradient); border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; color: white; font-weight: 800; }
-
-        .hero-card { position: relative; overflow: hidden; }
-        .hero-card::after { content: ''; position: absolute; top: -30px; right: -30px; width: 140px; height: 140px; background: var(--brand-gradient); opacity: 0.06; border-radius: 50%; }
-        .brand-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.75rem; border-radius: 999px; background: var(--claude-surface); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; border: 1px solid var(--claude-border); }
-        .brand-badge-dot { width: 6px; height: 6px; background: var(--claude-primary); border-radius: 50%; }
-        .price-tag { display: inline-flex; align-items: baseline; margin-top: 0.75rem; padding: 0.4rem 1rem; background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 12px; }
-        .price-currency { color: var(--claude-text-light); font-size: 0.85rem; font-weight: 700; margin-right: 0.1em; }
-        .price-amount { font-size: 1.65rem; font-weight: 800; }
-        .price-period { color: var(--claude-text-light); font-size: 0.8rem; font-weight: 500; margin-left: 0.25em; }
-        .price-tag-meta { color: var(--claude-text-light); font-size: 0.7rem; font-weight: 500; margin-left: 0.75em; padding-left: 0.75em; border-left: 1px solid var(--claude-border); text-transform: uppercase; }
-
-        .lang-selector { position: fixed; top: 1rem; right: 1rem; z-index: 1000; }
-        .lang-selector .dropdown-toggle { background: var(--claude-card-bg); border: 1px solid var(--claude-border); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.875rem; cursor: pointer; }
-        .lang-selector .dropdown-menu { min-width: 120px; border-radius: 8px; border: 1px solid var(--claude-border); background: var(--claude-card-bg); }
-        .lang-selector .dropdown-item { padding: 0.5rem 0.75rem; font-size: 0.875rem; }
-
-
-        /* ================================================================
-           2026 UI REFRESH · 保留 Claude 原有暖色体系，增强科技感与交互反馈
-           ================================================================ */
-        html { scroll-behavior: smooth; }
-        body {
-            position: relative;
-            overflow-x: hidden;
-            background:
-                radial-gradient(900px 520px at 18% -10%, rgba(204,120,92,.10), transparent 64%),
-                radial-gradient(820px 480px at 88% 18%, rgba(16,163,127,.055), transparent 68%),
-                linear-gradient(180deg, #FCFBF7 0%, #FAF7F1 100%);
-        }
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            z-index: -2;
-            pointer-events: none;
-            background-image:
-                linear-gradient(rgba(204,120,92,.025) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(204,120,92,.025) 1px, transparent 1px);
-            background-size: 38px 38px;
-            mask-image: linear-gradient(to bottom, rgba(0,0,0,.65), transparent 82%);
-            animation: gridDrift 18s linear infinite;
-        }
-        body::after {
-            content: '';
-            position: fixed;
-            width: 420px;
-            height: 420px;
-            right: -170px;
-            top: 16vh;
-            border-radius: 50%;
-            z-index: -1;
-            pointer-events: none;
-            background: radial-gradient(circle, rgba(204,120,92,.08), rgba(204,120,92,0) 68%);
-            filter: blur(8px);
-            animation: ambientFloat 8s ease-in-out infinite alternate;
-        }
-        @keyframes gridDrift { to { background-position: 38px 38px, 38px 38px; } }
-        @keyframes ambientFloat { from { transform: translate3d(0,-14px,0) scale(.96); } to { transform: translate3d(-28px,24px,0) scale(1.08); } }
-
-        .main-container {
-            background: rgba(255,255,255,.86);
-            border: 1px solid rgba(236,231,218,.92);
-            box-shadow:
-                0 1px 0 rgba(255,255,255,.95) inset,
-                0 18px 60px rgba(43,33,24,.08),
-                0 3px 16px rgba(43,33,24,.045);
-            backdrop-filter: blur(18px) saturate(1.05);
-            -webkit-backdrop-filter: blur(18px) saturate(1.05);
-            animation: panelEnter .55s cubic-bezier(.22,1,.36,1) both;
-        }
-        .main-container::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            border-radius: inherit;
-            background: linear-gradient(115deg, transparent 0 36%, rgba(255,255,255,.42) 48%, transparent 60% 100%);
-            transform: translateX(-110%);
-            animation: panelSheen 7s ease-in-out 1.1s infinite;
-        }
-        @keyframes panelEnter { from { opacity: 0; transform: translateY(14px) scale(.992); } to { opacity: 1; transform: none; } }
-        @keyframes panelSheen { 0%,72% { transform: translateX(-110%); } 88%,100% { transform: translateX(110%); } }
-
-        .hero-card {
-            border-color: rgba(204,120,92,.18) !important;
-            background:
-                radial-gradient(520px 160px at 50% -70px, rgba(204,120,92,.14), transparent 72%),
-                linear-gradient(145deg, rgba(255,250,244,.98), rgba(248,241,231,.92)) !important;
-            box-shadow: 0 10px 30px rgba(204,120,92,.07);
-        }
-        .hero-card::before {
-            content: '';
-            position: absolute;
-            width: 180px;
-            height: 180px;
-            left: -85px;
-            bottom: -105px;
-            border: 1px solid rgba(204,120,92,.18);
-            border-radius: 50%;
-            box-shadow: 0 0 0 22px rgba(204,120,92,.025), 0 0 0 48px rgba(204,120,92,.018);
-            pointer-events: none;
-        }
-        .brand-badge { backdrop-filter: blur(8px); box-shadow: 0 4px 16px rgba(43,33,24,.04); }
-        .brand-badge-dot { box-shadow: 0 0 0 5px rgba(204,120,92,.10); animation: dotPulse 2.2s ease-in-out infinite; }
-        @keyframes dotPulse { 50% { box-shadow: 0 0 0 9px rgba(204,120,92,.025); transform: scale(1.12); } }
-        .claude-logo-icon {
-            position: relative;
-            box-shadow: 0 8px 22px rgba(204,120,92,.22), 0 1px 0 rgba(255,255,255,.28) inset;
-            animation: logoFloat 4s ease-in-out infinite;
-        }
-        @keyframes logoFloat { 50% { transform: translateY(-3px) rotate(-1deg); box-shadow: 0 12px 28px rgba(204,120,92,.26); } }
-        .price-tag { box-shadow: 0 8px 24px rgba(43,33,24,.045); backdrop-filter: blur(10px); }
-
-        .trust-features > div > div {
-            transition: transform .25s cubic-bezier(.22,1,.36,1), border-color .25s ease, box-shadow .25s ease !important;
-        }
-        .trust-features > div > div:hover {
-            transform: translateY(-3px);
-            border-color: rgba(204,120,92,.34) !important;
-            box-shadow: 0 10px 24px rgba(43,33,24,.07);
-        }
-
-        .steps-container { position: relative; }
-        .step-indicator::before { background: linear-gradient(90deg, rgba(204,120,92,.18), var(--claude-border)); }
-        .step-number {
-            box-shadow: 0 2px 8px rgba(43,33,24,.04);
-            transition: transform .36s cubic-bezier(.22,1,.36,1), box-shadow .3s ease, background .3s ease, border-color .3s ease;
-        }
-        .step-number.active {
-            transform: scale(1.10);
-            box-shadow: 0 0 0 6px rgba(204,120,92,.08), 0 8px 18px rgba(204,120,92,.20);
-        }
-        .step-number.completed { box-shadow: 0 0 0 5px rgba(16,163,127,.07), 0 7px 16px rgba(16,163,127,.14); }
-
-        .step-card {
-            position: relative;
-            border-color: rgba(236,231,218,.95);
-            box-shadow: 0 1px 2px rgba(43,33,24,.02);
-            transition: transform .3s cubic-bezier(.22,1,.36,1), box-shadow .3s ease, border-color .3s ease;
-        }
-        .step-card.active {
-            border-color: rgba(204,120,92,.38);
-            box-shadow: 0 14px 34px rgba(43,33,24,.075), 0 0 0 1px rgba(204,120,92,.035) inset;
-            animation: stepReveal .42s cubic-bezier(.22,1,.36,1) both;
-        }
-        @keyframes stepReveal { from { opacity: .35; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-
-        .form-control {
-            background: rgba(249,247,241,.88);
-            border-color: rgba(224,216,201,.95);
-            box-shadow: 0 1px 0 rgba(255,255,255,.8) inset;
-            transition: border-color .22s ease, box-shadow .22s ease, background .22s ease, transform .22s ease;
-        }
-        .form-control:hover { border-color: rgba(204,120,92,.32); }
-        .form-control:focus {
-            background: rgba(255,255,255,.96);
-            border-color: rgba(204,120,92,.75);
-            box-shadow: 0 0 0 4px rgba(204,120,92,.09), 0 8px 24px rgba(204,120,92,.07);
-            transform: translateY(-1px);
-        }
-
-        /* ===== 主按钮：保留 Claude 色系，但不再使用“灰掉”的加载态 ===== */
-        .btn {
-            min-height: 48px;
-            border-radius: 13px;
-            transform: translateZ(0);
-            will-change: transform;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-        }
-        .btn-primary {
-            position: relative;
-            isolation: isolate;
-            overflow: hidden;
-            background: linear-gradient(120deg, #E39A80 0%, #CC785C 42%, #B9654D 100%);
-            background-size: 180% 180%;
-            border: 1px solid rgba(168,93,71,.18);
-            box-shadow:
-                0 10px 24px rgba(204,120,92,.20),
-                0 2px 5px rgba(43,33,24,.08),
-                0 1px 0 rgba(255,255,255,.34) inset;
-            transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, filter .22s ease;
-        }
-        .btn-primary::before {
-            content: '';
-            position: absolute;
-            inset: 1px;
-            border-radius: 11px;
-            z-index: -1;
-            pointer-events: none;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,.16), transparent 35%),
-                radial-gradient(130px 36px at var(--mx,50%) 0%, rgba(255,255,255,.26), transparent 72%);
-        }
-        .btn-primary::after {
-            content: '';
-            position: absolute;
-            top: -60%;
-            left: -35%;
-            width: 28%;
-            height: 220%;
-            z-index: 0;
-            pointer-events: none;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,.52), transparent);
-            transform: rotate(17deg) translateX(-190%);
-            transition: transform .65s cubic-bezier(.2,.7,.2,1);
-        }
-        .btn-primary:hover {
-            transform: translateY(-2px) scale(1.006);
-            box-shadow: 0 14px 30px rgba(204,120,92,.26), 0 3px 8px rgba(43,33,24,.09), 0 1px 0 rgba(255,255,255,.38) inset;
-            filter: saturate(1.04) brightness(1.03);
-        }
-        .btn-primary:hover::after { transform: rotate(17deg) translateX(560%); }
-        .btn-primary:active { transform: translateY(0) scale(.988); transition-duration: .08s; }
-        .btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(204,120,92,.14), 0 14px 30px rgba(204,120,92,.24); }
-        .btn-label { position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; transition: opacity .18s ease, transform .18s ease; }
-
-        /* disabled 仍保留品牌色，防止“点击后变灰像卡死” */
-        .btn-primary:disabled,
-        .btn-primary.disabled {
-            opacity: 1;
-            color: #fff;
-            cursor: wait;
-            background: linear-gradient(120deg, #D9957C 0%, #C7775B 50%, #B96A52 100%);
-            box-shadow: 0 8px 20px rgba(204,120,92,.16), 0 1px 0 rgba(255,255,255,.22) inset;
-            transform: none;
-            filter: none;
-        }
-
-        .btn.is-loading { pointer-events: none; overflow: hidden; }
-        .btn.is-loading .btn-label { opacity: 1; transform: translateX(8px); }
-        .btn.is-loading .btn-label::before {
-            content: '';
-            width: 16px;
-            height: 16px;
-            flex: 0 0 16px;
-            border-radius: 50%;
-            border: 2px solid rgba(255,255,255,.38);
-            border-top-color: #fff;
-            animation: techSpin .68s linear infinite;
-        }
-        .btn.is-loading::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            z-index: 1;
-            pointer-events: none;
-            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.10) 45%, rgba(255,255,255,.22) 50%, rgba(255,255,255,.10) 55%, transparent 100%);
-            transform: translateX(-100%);
-            animation: loadingScan 1.45s ease-in-out infinite;
-        }
-        .btn.is-loading::after { display: none; }
-        @keyframes techSpin { to { transform: rotate(360deg); } }
-        @keyframes loadingScan { to { transform: translateX(100%); } }
-        .btn-cta-pulse { animation: ctaPulseFuture 2.8s ease-in-out infinite; }
-        @keyframes ctaPulseFuture {
-            0%,100% { box-shadow: 0 10px 24px rgba(204,120,92,.20), 0 2px 5px rgba(43,33,24,.08), 0 1px 0 rgba(255,255,255,.34) inset; }
-            50% { box-shadow: 0 12px 30px rgba(204,120,92,.28), 0 0 0 7px rgba(204,120,92,.055), 0 1px 0 rgba(255,255,255,.34) inset; }
-        }
-        .ripple { z-index: 1; background: rgba(255,255,255,.34); }
-
-        .alert {
-            animation: alertEnter .28s cubic-bezier(.22,1,.36,1) both;
-            box-shadow: 0 6px 18px rgba(43,33,24,.04);
-        }
-        @keyframes alertEnter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-        .alert-secondary {
-            background: linear-gradient(135deg, rgba(246,242,234,.95), rgba(251,248,243,.95));
-            border-color: rgba(204,120,92,.18);
-            color: var(--claude-text);
-        }
-
-        .site-nav-trigger, .lang-selector .dropdown-toggle {
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            box-shadow: 0 8px 24px rgba(43,33,24,.065);
-        }
-
-        @media (max-width: 768px) {
-            body::before { background-size: 30px 30px; }
-            .main-container { margin-top: 1rem; box-shadow: 0 14px 38px rgba(43,33,24,.07); }
-            .btn { min-height: 50px; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-            body::before, body::after, .main-container, .main-container::after, .brand-badge-dot,
-            .claude-logo-icon, .step-card.active, .btn-cta-pulse, .btn.is-loading::before { animation: none !important; }
-        }
-
+/* Claude finish: the original palette, with Grok-style depth and feedback. */
+body {
+    background:
+        radial-gradient(ellipse 900px 500px at 18% 0%, rgba(204,120,92,.075), transparent 72%),
+        radial-gradient(ellipse 760px 620px at 100% 45%, rgba(236,231,218,.36), transparent 76%),
+        var(--claude-bg);
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    color: var(--claude-text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+.main-container {
+    position: relative;
+    overflow: hidden;
+    max-width: 800px;
+    padding: 3rem;
+    margin: 2rem 0;
+    border: 1px solid var(--claude-border);
+    border-radius: 24px;
+    background: linear-gradient(180deg, #fff 0%, #fff 80%, #fdfbf7 100%);
+    box-shadow: inset 0 1px 0 #fff, 0 6px 18px rgba(43,33,24,.035), 0 26px 64px rgba(43,33,24,.075);
+    animation: claudeSurfaceEnter .6s cubic-bezier(.22,1,.36,1) backwards;
+}
+.main-container::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 12%; right: 12%; height: 2px;
+    background: linear-gradient(90deg, transparent, #f5e2d7 26%, #d9aa93 50%, #f5e2d7 74%, transparent);
+    pointer-events: none;
+}
+.step-card {
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--claude-border);
+    border-radius: 18px;
+    background: var(--claude-card-bg);
+    box-shadow: inset 0 1px 0 #fff, 0 2px 4px rgba(43,33,24,.025), 0 8px 18px rgba(43,33,24,.025);
+    transition: border-color .25s ease, box-shadow .3s ease;
+}
+.step-card.active {
+    border-color: rgba(204,120,92,.5);
+    box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(204,120,92,.07), 0 10px 26px rgba(43,33,24,.06);
+    animation: claudeContentEnter .35s cubic-bezier(.22,1,.36,1) backwards;
+}
+.step-card.completed { border-color: var(--claude-success); background: #FAFFF8; }
+.card-header { padding: 1.5rem 1.75rem; border: none; background: transparent; color: var(--claude-text); font-weight: 600; }
+.card-header h5 { line-height: 1.5; font-weight: 600; letter-spacing: -.025em; }
+.card-body { padding: 0 1.75rem 1.75rem; }
+.hero-card {
+    border-color: #e9dbcd !important;
+    border-radius: 21px;
+    background:
+        radial-gradient(ellipse at 45% -15%, rgba(255,255,255,.95), transparent 68%),
+        var(--brand-gradient-soft) !important;
+    box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(204,120,92,.06), 0 6px 18px rgba(43,33,24,.035);
+}
+.hero-card::after {
+    content: '';
+    position: absolute;
+    width: 150px; height: 150px; top: -65px; right: -65px;
+    border: 1px solid rgba(204,120,92,.09);
+    border-radius: 50%;
+    box-shadow: 0 0 0 24px rgba(204,120,92,.025), 0 0 0 49px rgba(204,120,92,.015);
+    pointer-events: none;
+}
+.brand-badge {
+    display: flex; align-items: center; gap: .45rem;
+    width: max-content; max-width: 100%; margin-left: auto; margin-right: auto;
+    padding: .3rem .85rem;
+    border: 1px solid #e9dccd;
+    border-radius: 999px;
+    background: rgba(255,255,255,.65);
+    box-shadow: inset 0 1px 0 #fff, 0 2px 3px rgba(43,33,24,.025);
+    font-size: .6875rem; font-weight: 700; letter-spacing: .12em;
+}
+.brand-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude-primary); box-shadow: 0 0 0 3px rgba(204,120,92,.09); }
+.claude-logo { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .625rem; font-size: 1.65rem; font-weight: 750; line-height: 1.3; letter-spacing: -.035em; color: var(--claude-text); }
+.claude-logo-icon {
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 38px; height: 38px; border-radius: 11px;
+    background: linear-gradient(145deg, #E89B7F, #CC785C 52%, #B56B51);
+    border: 1px solid #B96D53; border-top-color: #EDB29B;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.34), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 8px 13px rgba(168,93,71,.16);
+    font-size: 1.2rem; font-weight: 800; color: #fff;
+    transition: transform .3s cubic-bezier(.22,1,.36,1), box-shadow .3s ease;
+}
+.price-tag {
+    display: inline-flex; align-items: baseline;
+    margin-top: 1rem; padding: .4rem 1rem;
+    background: linear-gradient(180deg, #fff, #fcf8f2);
+    border: 1px solid #e8ddcd; border-radius: 12px;
+    box-shadow: inset 0 1px 0 #fff, 0 2px 0 #e9dfd1, 0 5px 10px rgba(43,33,24,.035);
+}
+.price-currency { margin-right: .1em; color: var(--claude-text-light); font-size: .85rem; font-weight: 700; }
+.price-amount { font-size: 1.65rem; font-weight: 800; letter-spacing: -.035em; }
+.price-period { margin-left: .25em; color: var(--claude-text-light); font-size: .8rem; font-weight: 500; }
+.price-tag-meta { margin-left: .75em; padding-left: .75em; border-left: 1px solid var(--claude-border); color: var(--claude-text-light); font-size: .7rem; font-weight: 500; text-transform: uppercase; }
+.trust-features > div > div {
+    height: 100%;
+    background: linear-gradient(150deg, #fdfbf6, var(--claude-surface)) !important;
+    border-color: #e7ddce !important; border-radius: 12px !important;
+    box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(204,120,92,.05), 0 3px 0 rgba(220,205,185,.38), 0 6px 12px rgba(43,33,24,.025);
+    transition: transform .28s cubic-bezier(.22,1,.36,1), box-shadow .28s ease, border-color .25s ease;
+    animation: claudeFeatureEnter .55s cubic-bezier(.22,1,.36,1) backwards;
+}
+.trust-features > div:nth-child(1) > div { animation-delay: .08s; }
+.trust-features > div:nth-child(2) > div { animation-delay: .15s; }
+.trust-features > div:nth-child(3) > div { animation-delay: .22s; }
+.trust-features .bi { color: var(--claude-primary-dark); filter: drop-shadow(0 1px 0 #fff); }
+.steps-container { position: relative; padding: 1.25rem 0; margin-bottom: 2rem; background: transparent; }
+.step-indicator { position: relative; }
+.step-indicator::before { content: ''; position: absolute; top: 18px; left: 50%; width: 100%; height: 2px; background: linear-gradient(90deg, rgba(204,120,92,.2), var(--claude-border)); z-index: 1; }
+.step-indicator:last-child::before { display: none; }
+.step-number {
+    display: flex; align-items: center; justify-content: center;
+    position: relative; z-index: 2;
+    width: 36px; height: 36px; margin: 0 auto .5rem;
+    border: 2px solid var(--claude-border); border-radius: 50%;
+    background: linear-gradient(155deg, #fff, var(--claude-surface));
+    color: var(--claude-text-light); font-weight: 600; font-size: .875rem;
+    box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(220,205,185,.22);
+    transition: transform .3s cubic-bezier(.22,1,.36,1), background .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.step-number.active {
+    background: var(--brand-gradient); color: #fff; border-color: var(--claude-primary);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 0 var(--claude-primary-dark), 0 6px 12px rgba(204,120,92,.2);
+    transform: scale(1.06);
+}
+.step-number.active::after { content: ''; position: absolute; inset: -6px; border: 1px solid rgba(204,120,92,.18); border-radius: 50%; pointer-events: none; }
+.step-number.completed { background: var(--claude-success); border-color: var(--claude-success); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 0 rgba(16,125,96,.28), 0 5px 10px rgba(16,163,127,.12); }
+.step-label { font-weight: 500; color: var(--claude-text-light); font-size: .75rem; }
+.step-label.active { color: var(--claude-text); font-weight: 600; }
+.form-label { margin-bottom: .5rem; color: var(--claude-text); font-size: .9375rem; font-weight: 500; }
+.form-control {
+    border: 1.5px solid #e2d9c9; border-radius: 12px;
+    padding: .875rem 1rem;
+    background: linear-gradient(180deg, #f5f1e9, #fbf8f2);
+    box-shadow: inset 0 2px 4px rgba(43,33,24,.04), 0 1px 0 #fff;
+    color: var(--claude-text); font-size: 1rem;
+    transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+.form-control:focus { outline: none; background: #fffefa; border-color: var(--claude-primary); color: var(--claude-text); box-shadow: inset 0 1px 2px rgba(43,33,24,.02), 0 0 0 3px rgba(204,120,92,.10); }
+.form-control::placeholder { color: var(--claude-text-light); opacity: .9; }
+.form-control-lg { padding: 1rem 1.25rem; font-size: 1.125rem; }
+/* Warm satin face, highlighted edge, solid base, and soft contact shadow. */
+.btn {
+    position: relative; isolation: isolate; overflow: hidden;
+    min-height: 48px; padding: .875rem 1.75rem; border: 1px solid transparent; border-radius: 13px;
+    font-size: 1rem; font-weight: 600;
+    user-select: none; -webkit-tap-highlight-color: transparent;
+    transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .22s ease, filter .2s ease, background .2s ease;
+}
+.btn-lg { padding: 1.125rem 2rem; font-size: 1.0625rem; }
+.btn-sm { min-height: 40px; padding: .6rem 1.25rem; }
+.btn-label { position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
+.btn-primary {
+    background:
+        linear-gradient(180deg, rgba(255,255,255,.10), transparent 55%),
+        radial-gradient(ellipse 65% 160% at var(--mx,50%) 0%, rgba(255,255,255,.13), transparent 85%),
+        linear-gradient(135deg, #D98B70 0%, #CC785C 48%, #B96B52 100%);
+    border-color: #B2674E; border-top-color: #EBAB90;
+    color: #fff; letter-spacing: .01em; text-shadow: 0 1px 1px rgba(117,58,38,.28);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.30), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 8px 15px rgba(168,93,71,.19), 0 17px 26px rgba(168,93,71,.065);
+}
+.btn-primary::after {
+    content: ''; position: absolute; top: 0; left: -135%; width: 70%; height: 100%; z-index: 1;
+    background: linear-gradient(115deg, transparent 12%, rgba(255,255,255,.09) 45%, rgba(255,255,255,.22) 50%, transparent 86%);
+    transform: skewX(-22deg); pointer-events: none;
+    transition: left .7s cubic-bezier(.22,1,.36,1);
+}
+.btn-primary:hover, .btn-primary:focus, .btn-primary:active, .btn-primary.active { border-color: #B2674E; border-top-color: #EBAB90; background-color: var(--claude-primary); color: #fff; }
+.btn-primary:focus { box-shadow: inset 0 1px 0 rgba(255,255,255,.30), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 8px 15px rgba(168,93,71,.19), 0 17px 26px rgba(168,93,71,.065); }
+.btn-primary:focus-visible { outline: 2px solid var(--claude-primary); outline-offset: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.34), 0 3px 0 #A85D47, 0 8px 16px rgba(168,93,71,.2); }
+.btn-primary:active:not(:disabled):not(.is-loading) { transform: translateY(2px) scale(.992); filter: brightness(.98); box-shadow: inset 0 2px 4px rgba(117,58,38,.19), inset 0 1px 0 rgba(255,255,255,.19), 0 1px 0 #A85D47, 0 3px 7px rgba(168,93,71,.15); }
+.btn-primary:disabled, .btn-primary.disabled { background: linear-gradient(135deg, #D28D74, #C47A60 50%, #B76D54); border-color: #B2674E; border-top-color: #EBAB90; color: #fff; opacity: .8; cursor: not-allowed; box-shadow: inset 0 1px 0 rgba(255,255,255,.24), 0 2px 0 #AC6B53, 0 5px 10px rgba(168,93,71,.12); }
+.btn-success { background: var(--claude-success); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 0 rgba(16,125,96,.3), 0 5px 12px rgba(16,163,127,.13); }
+.btn-outline-secondary { border-color: #e1d7c7; background: linear-gradient(180deg, #fff, var(--claude-surface)); color: var(--claude-text); box-shadow: inset 0 1px 0 #fff, 0 2px 0 #e7ddce, 0 4px 7px rgba(43,33,24,.035); }
+.btn-outline-secondary:hover, .btn-outline-secondary:focus, .btn-outline-secondary:active { border-color: #d8c8b4; background-color: var(--claude-surface); color: var(--claude-text); box-shadow: inset 0 1px 0 #fff, 0 2px 0 #e7ddce, 0 4px 7px rgba(43,33,24,.035); }
+.btn-outline-secondary:focus-visible { outline: 2px solid var(--claude-primary); outline-offset: 3px; }
+.btn-outline-secondary:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(43,33,24,.07), 0 1px 0 #e7ddce; }
+.btn-cta-pulse { animation: none; }
+.btn.is-loading, .btn:disabled, .btn.disabled { transform: none !important; filter: none; animation: none; }
+.btn.is-loading { pointer-events: none; cursor: wait; opacity: 1; }
+.btn.is-loading .btn-label { opacity: 1; }
+.btn.is-loading .btn-label::before { content: ''; width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: claudeSpin .7s linear infinite; }
+.btn.is-loading::after, .btn:disabled::after, .btn.disabled::after { display: none; }
+.ripple { position: absolute; z-index: 1; border-radius: 50%; background: rgba(255,255,255,.32); transform: scale(0); animation: claudeRipple .6s linear; pointer-events: none; }
+.alert { padding: 1rem 1.25rem; border: 1px solid; border-radius: 12px; font-size: .9375rem; box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 3px 10px rgba(43,33,24,.025); animation: claudeContentEnter .28s cubic-bezier(.22,1,.36,1) backwards; overflow-wrap: anywhere; }
+.alert-sm { font-size: .875rem; }
+.alert-success { background: #F0FDF4; border-color: #BBF7D0; color: #166534; }
+.alert-secondary { background: linear-gradient(135deg, #f7f3ea, #fcf9f3); border-color: #e9d9ca; color: var(--claude-text); }
+.alert-danger { border-color: #f1c9c4; }
+.progress { height: 8px; border-radius: 12px; background: var(--claude-border); }
+.progress-bar { border-radius: 12px; background: var(--claude-primary); transition: width .3s ease; }
+.status-card { padding: 2rem; margin-top: 2rem; border: 1px solid var(--claude-border); border-radius: 16px; background: var(--claude-card-bg); box-shadow: inset 0 1px 0 #fff, 0 6px 18px rgba(43,33,24,.04); }
+.recharge-confirmation { margin-bottom: 1.4rem; padding: 1.25rem; border: 1px solid #e8ddce; border-radius: 14px; background: linear-gradient(145deg, #fdfbf7, var(--claude-surface)); box-shadow: inset 0 1px 0 #fff, 0 2px 5px rgba(43,33,24,.025); }
+.confirmation-heading { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; color: var(--claude-text); font-size: .9375rem; font-weight: 600; }
+.confirmation-heading .bi { color: var(--claude-primary-dark); }
+.confirmation-details { margin: 0; }
+.confirmation-row { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: .75rem; padding: .75rem 0; border-top: 1px solid rgba(204,120,92,.12); font-size: .875rem; }
+.confirmation-row dt { color: var(--claude-text-light); font-weight: 500; }
+.confirmation-row dd { min-width: 0; margin: 0; color: var(--claude-text); font-weight: 600; overflow-wrap: anywhere; }
+.confirmation-code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-variant-ligatures: none; word-break: break-all; user-select: text; }
+.confirmation-hint { margin: .9rem 0 0; color: var(--claude-text-light); font-size: .8125rem; line-height: 1.7; }
+.confirmation-edit { margin-top: .85rem; font-size: .875rem; }
+#queryToggleIcon { display: inline-block; }
+[onclick="toggleQuerySection()"] { border-radius: 17px; transition: background .2s ease; }
+#querySection, #queryResultsContainer { animation: claudeContentEnter .25s cubic-bezier(.22,1,.36,1) backwards; }
+.site-nav-bar { position: fixed; top: .85rem; left: .85rem; z-index: 1000; display: flex; align-items: center; gap: .5rem; max-width: calc(100vw - 1.7rem); }
+.site-nav-trigger { display: inline-flex; align-items: center; gap: .5rem; list-style: none; padding: .45rem .85rem .45rem .5rem; border: 1px solid #e6ddce; border-radius: 999px; background: linear-gradient(180deg, #fff, #fcf8f1); color: var(--claude-text); font-weight: 600; font-size: .8125rem; line-height: 1; box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(224,211,191,.4), 0 5px 12px rgba(43,33,24,.045); }
+.site-nav-trigger-dot { width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; background: var(--brand-gradient); box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 1px 2px rgba(168,93,71,.18); }
+.lang-selector { position: fixed; top: 1rem; right: 1rem; z-index: 1000; }
+.lang-selector .dropdown-toggle { padding: .5rem .75rem; border: 1px solid #e6ddce; border-radius: 10px; background: linear-gradient(180deg, #fff, #fcf8f1); color: var(--claude-text); font-size: .875rem; box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(224,211,191,.4), 0 5px 12px rgba(43,33,24,.045); cursor: pointer; transition: transform .2s ease, box-shadow .2s ease; }
+.lang-selector .dropdown-toggle:focus-visible { outline: 2px solid var(--claude-primary); outline-offset: 3px; }
+.lang-selector .dropdown-menu { min-width: 120px; padding: .35rem; border: 1px solid var(--claude-border); border-radius: 12px; background: #fffefa; box-shadow: inset 0 1px 0 #fff, 0 10px 25px rgba(43,33,24,.1); }
+.lang-selector .dropdown-item { padding: .5rem .75rem; border-radius: 8px; font-size: .875rem; color: var(--claude-text); }
+.lang-selector .dropdown-item:hover, .lang-selector .dropdown-item:focus { background: var(--claude-surface); color: var(--claude-primary-dark); }
+.dropdown-menu.show { animation: claudeContentEnter .18s ease-out; }
+.footer { padding: 2rem 0; text-align: center; color: var(--claude-text-light); font-size: .875rem; }
+@media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover:not(:disabled):not(.disabled):not(.is-loading) { transform: translateY(-2px); filter: brightness(1.045); box-shadow: inset 0 1px 0 rgba(255,255,255,.36), inset 0 -2px 0 rgba(117,58,38,.2), 0 4px 0 #A85D47, 0 14px 23px rgba(168,93,71,.22), 0 22px 32px rgba(168,93,71,.07); }
+    .btn-primary:hover:not(:disabled):not(.is-loading)::after { left: 150%; }
+    .btn-primary:hover:active:not(:disabled):not(.disabled):not(.is-loading) { transform: translateY(2px) scale(.992); box-shadow: inset 0 2px 4px rgba(117,58,38,.19), inset 0 1px 0 rgba(255,255,255,.19), 0 1px 0 #A85D47, 0 3px 7px rgba(168,93,71,.15); }
+    .btn-outline-secondary:hover:not(:disabled) { transform: translateY(-2px); background: linear-gradient(180deg, #fff, #faf6ee); color: var(--claude-text); box-shadow: inset 0 1px 0 #fff, 0 3px 0 #e7ddce, 0 8px 12px rgba(43,33,24,.06); }
+    .trust-features > div > div:hover { transform: translateY(-3px); border-color: #dcbda6 !important; box-shadow: inset 0 1px 0 #fff, 0 4px 0 rgba(220,205,185,.4), 0 12px 18px rgba(43,33,24,.055); }
+    .claude-logo:hover .claude-logo-icon { transform: translateY(-2px) rotate(-4deg); }
+    .form-control:hover:not(:focus) { border-color: #d2b49e; }
+    [onclick="toggleQuerySection()"]:hover { background: #fcf8f1; }
+    .lang-selector .dropdown-toggle:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 #fff, 0 3px 0 rgba(224,211,191,.4), 0 7px 14px rgba(43,33,24,.06); }
+}
+@keyframes claudeSurfaceEnter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes claudeFeatureEnter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes claudeContentEnter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes claudeSpin { to { transform: rotate(360deg); } }
+@keyframes claudeRipple { to { transform: scale(4); opacity: 0; } }
+@media (max-width: 768px) {
+    .main-container { margin: 1rem .75rem; padding: 1.5rem 1.25rem; border-radius: 20px; }
+    .btn { width: 100%; min-height: 50px; padding: .875rem 1rem; }
+    #queryCardsBtn { width: auto; min-height: 42px; padding: .6rem 1.25rem; }
+}
+@media (max-width: 575px) {
+    .main-container { margin: 2rem 0 .75rem; padding: 1.35rem 1rem; box-shadow: inset 0 1px 0 #fff, 0 8px 26px rgba(43,33,24,.065); }
+    .hero-card { border-radius: 17px; }
+    .claude-logo { font-size: clamp(1.3rem, 5vw, 1.65rem); }
+    .steps-container { margin-bottom: 1.5rem; }
+    .card-header { padding: 1.25rem 1.1rem; }
+    .card-header h5 { font-size: 1.0625rem; }
+    .card-body { padding: 0 1.1rem 1.25rem; }
+    .form-control-lg { padding: .875rem 1rem; font-size: 1rem; }
+    .btn-primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.3), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 7px 13px rgba(168,93,71,.16); }
+    .btn-label { max-width: 100%; }
+    .recharge-confirmation { padding: 1rem; }
+    .confirmation-row { grid-template-columns: 1fr; gap: .3rem; }
+}
+@media (max-width: 359px) {
+    .trust-features > div > div { padding-left: .25rem !important; padding-right: .25rem !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
     </style>
 </head>
 <body>
@@ -558,18 +404,28 @@
                                         <span style="font-size: 0.8125rem; color: var(--claude-text-light);" data-i18n="claudeIdFormat">格式：8位-4位-4位-4位-12位</span>
                                     </div>
                                 </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100"><span class="btn-label" data-i18n="confirmAndUpgrade">确认并升级</span></button>
+                                <button type="submit" class="btn btn-primary btn-lg w-100"><span class="btn-label">下一步 · 核对充值信息</span></button>
                             </form>
                             <div id="step2-result" class="mt-3"></div>
                         </div>
                     </div>
 
                     <div class="card step-card" id="step3" style="display: none;">
-                        <div class="card-header"><h5 class="mb-0" id="step3Title" data-i18n="step3Title">步骤 3 · 立即激活 Claude Pro 会员</h5></div>
+                        <div class="card-header"><h5 class="mb-0" id="step3Title">步骤 3 · 确认充值信息</h5></div>
                         <div class="card-body">
-                            <button id="startRechargeBtn" class="btn btn-primary btn-lg w-100 btn-cta-pulse" data-loading-text="正在安全充值" style="font-weight: 600;">
-                                <span class="btn-label" id="startRechargeBtnText" data-i18n="activateProBtn">立即激活 Claude Pro</span>
+                            <section class="recharge-confirmation" aria-labelledby="confirmationTitle">
+                                <div class="confirmation-heading"><i class="bi bi-shield-check" aria-hidden="true"></i><span id="confirmationTitle">请核对充值信息</span></div>
+                                <dl class="confirmation-details">
+                                    <div class="confirmation-row"><dt>充值套餐</dt><dd id="confirmProduct">—</dd></div>
+                                    <div class="confirmation-row"><dt>兑换码</dt><dd class="confirmation-code" id="confirmCdk">—</dd></div>
+                                    <div class="confirmation-row"><dt>组织 ID</dt><dd class="confirmation-code" id="confirmOrgId">—</dd></div>
+                                </dl>
+                                <p class="confirmation-hint" id="confirmationHint">充值将绑定到以上组织 ID，请核对兑换码和账号信息，确认无误后再点击充值。</p>
+                            </section>
+                            <button id="startRechargeBtn" type="button" class="btn btn-primary btn-lg w-100 btn-cta-pulse" data-loading-text="正在安全充值" style="font-weight: 600;">
+                                <span class="btn-label" id="startRechargeBtnText">确认无误，立即充值</span>
                             </button>
+                            <button id="editAccountBtn" type="button" class="btn btn-outline-secondary w-100 confirmation-edit"><span class="btn-label">返回修改账号</span></button>
                             <div id="step3-result" class="mt-3"></div>
                         </div>
                     </div>
@@ -698,7 +554,21 @@
             .replace(/'/g, '&#039;');
 
         /* ---------- 步骤指示器 / 卡片切换 ---------- */
+        function renderRechargeConfirmation() {
+            document.getElementById('confirmProduct').textContent = flow.productName || '—';
+            document.getElementById('confirmCdk').textContent = flow.cdk || '—';
+            document.getElementById('confirmOrgId').textContent = flow.claudeUserId || '—';
+            document.getElementById('confirmationTitle').textContent = rechargeDone ? '本次充值信息' : '请核对充值信息';
+            document.getElementById('confirmationHint').textContent = rechargeDone
+                ? '充值已完成，可在下方查看本次充值结果。'
+                : '充值将绑定到以上组织 ID，请核对兑换码和账号信息，确认无误后再点击充值。';
+            const editBtn = document.getElementById('editAccountBtn');
+            editBtn.style.display = rechargeDone ? 'none' : '';
+            editBtn.disabled = document.getElementById('startRechargeBtn').disabled;
+        }
+
         function goToStep(n) {
+            if (n === 3) renderRechargeConfirmation();
             for (let i = 1; i <= 3; i++) {
                 const card = document.getElementById('step' + i);
                 const ind  = document.getElementById('step' + i + '-indicator');
@@ -803,6 +673,14 @@
             const bindForm = document.getElementById('bindForm');
             const startBtn = document.getElementById('startRechargeBtn');
 
+            document.getElementById('editAccountBtn').addEventListener('click', function () {
+                if (rechargeDone || startBtn.disabled) return;
+                clearMsg('step2-result');
+                clearMsg('step3-result');
+                goToStep(2);
+                document.getElementById('claudeUserId').focus({ preventScroll: true });
+            });
+
             // Worker 会根据卡密自动选择 HongYun / vip666ai。
             if (actForm) actForm.addEventListener('submit', async function (e) {
                 e.preventDefault();
@@ -879,6 +757,7 @@
 
             setBtnLoading(btn, true, '正在安全充值');
             btn.classList.remove('btn-cta-pulse');
+            renderRechargeConfirmation();
 
             try {
                 showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在验证 Claude 账号…');
@@ -952,6 +831,7 @@
                 showMsg('step3-result', 'error', '❌ 中止：' + escapeHtml(err.message));
             } finally {
                 setBtnLoading(btn, false);
+                renderRechargeConfirmation();
             }
         }
 
@@ -1030,12 +910,13 @@
             const info = document.getElementById('cardInfo');
             if (info) info.textContent = '';
             const btnText = document.getElementById('startRechargeBtnText');
-            if (btnText) btnText.textContent = '立即激活 Claude Pro';
+            if (btnText) btnText.textContent = '确认无误，立即充值';
             const startBtn = document.getElementById('startRechargeBtn');
             if (startBtn) {
                 startBtn.classList.add('btn-cta-pulse');
                 setBtnLoading(startBtn, false);
             }
+            renderRechargeConfirmation();
             goToStep(1);
             if (cc) {
                 try { cc.focus(); } catch (e) {}
