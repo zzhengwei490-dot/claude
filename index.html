@@ -290,6 +290,56 @@ body {
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Delivery status: persistent DOM, real milestones, no simulated percentage. */
+.delivery-card { --delivery-color: #CC785C; position: relative; isolation: isolate; padding: 1.4rem; margin: .15rem 0 1.3rem; border: 1px solid #eadbd0; border-radius: 19px; background: radial-gradient(ellipse at 50% 0, #fff8ef 0, transparent 70%), #fffdfa; box-shadow: inset 0 1px 0 #fff, 0 9px 26px rgba(83,53,33,.045); overflow: hidden; animation: claudeContentEnter .3s ease-out; }
+.delivery-card[data-state="success"] { --delivery-color: #24856a; border-color: #cde4d8; background: radial-gradient(ellipse at 50% 0, #eff9f2, transparent 70%), #fdfffc; }
+.delivery-card[data-state="error"] { --delivery-color: #b75545; border-color: #edd1c9; }
+.delivery-card[data-state="pending"] { --delivery-color: #a67a36; border-color: #e8ddc4; }
+.delivery-topline { display: flex; align-items: center; justify-content: space-between; gap: .5rem; color: var(--claude-text-light); font-size: .6875rem; letter-spacing: .035em; }
+.delivery-status-label { display: inline-flex; align-items: center; gap: .4rem; }
+.delivery-status-label::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--delivery-color); box-shadow: 0 0 0 3px rgba(204,120,92,.08); }
+.delivery-elapsed { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.delivery-art { position: relative; display: grid; place-items: center; width: 100px; height: 100px; margin: 1rem auto .85rem; }
+.delivery-art::before { content: ''; position: absolute; inset: 0; border: 1px solid rgba(204,120,92,.10); border-radius: 50%; background: radial-gradient(circle, rgba(204,120,92,.06), transparent 72%); }
+.delivery-orbit { position: absolute; inset: 0; border: 1px solid transparent; border-top-color: rgba(204,120,92,.55); border-left-color: rgba(204,120,92,.1); border-radius: 50%; animation: deliveryOrbit 4s linear infinite; }
+.delivery-orbit::after { content: ''; position: absolute; top: 11px; right: 11px; width: 5px; height: 5px; background: #d49a7d; border-radius: 50%; box-shadow: 0 0 9px rgba(204,120,92,.25); }
+.delivery-core { display: grid; place-items: center; width: 68px; height: 68px; border: 1px solid #f3d8c4; border-radius: 23px; color: var(--delivery-color); background: linear-gradient(145deg, #fff, #f8ebdf); box-shadow: inset 0 1px 0 #fff, 0 5px 0 rgba(222,195,170,.25), 0 10px 20px rgba(117,75,47,.09); animation: deliveryBreathe 2.8s ease-in-out infinite; }
+.delivery-core svg { width: 37px; height: 37px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.delivery-core .delivery-check, .delivery-core .delivery-pause, .delivery-core .delivery-cross { display: none; }
+.delivery-title { margin: 0; color: var(--claude-text); text-align: center; font-size: 1.125rem; font-weight: 650; letter-spacing: -.025em; line-height: 1.6; }
+.delivery-description { max-width: 27rem; min-height: 2.8em; margin: .35rem auto 1.2rem; color: var(--claude-text-light); text-align: center; font-size: .8125rem; line-height: 1.7; overflow-wrap: anywhere; }
+.delivery-rail { position: relative; height: 3px; margin: 0 .25rem 1rem; border-radius: 5px; background: #eee5d9; overflow: hidden; }
+.delivery-rail::after { content: ''; position: absolute; inset: 0; width: 42%; border-radius: inherit; background: linear-gradient(90deg, transparent, var(--delivery-color), transparent); animation: deliverySweep 1.9s ease-in-out infinite; }
+.delivery-milestones { display: flex; justify-content: space-between; gap: .25rem; padding: 0; margin: 0; list-style: none; }
+.delivery-milestones li { display: flex; align-items: center; gap: .35rem; color: #a69784; font-size: .6875rem; white-space: nowrap; }
+.delivery-milestones i { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid #e8dfd2; font-style: normal; font-size: .625rem; line-height: 1; }
+.delivery-milestones .is-current { color: var(--delivery-color); font-weight: 600; }
+.delivery-milestones .is-current i { border-color: currentColor; background: #fff6ec; box-shadow: 0 0 0 3px rgba(204,120,92,.06); }
+.delivery-milestones .is-done { color: var(--delivery-color); }
+.delivery-milestones .is-done i { background: var(--delivery-color); border-color: var(--delivery-color); color: #fff; }
+.delivery-meta { display: grid; gap: .5rem; margin: 1.2rem 0 0; padding-top: .95rem; border-top: 1px solid rgba(139,115,85,.12); font-size: .75rem; }
+.delivery-meta > div { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); gap: .75rem; }
+.delivery-meta dt { margin: 0; color: var(--claude-text-light); font-weight: 400; }
+.delivery-meta dd { margin: 0; color: var(--claude-text); overflow-wrap: anywhere; }
+.delivery-note { margin: .85rem 0 0; font-size: .6875rem; color: var(--claude-text-light); text-align: center; line-height: 1.7; }
+.delivery-card:not([data-state="working"]) .delivery-orbit { display: none; }
+.delivery-card:not([data-state="working"]) .delivery-core { animation: none; }
+.delivery-card:not([data-state="working"]) .delivery-spark { display: none; }
+.delivery-card[data-state="success"] .delivery-core { border-color: #d8eadd; background: linear-gradient(145deg, #fff, #e7f5eb); box-shadow: inset 0 1px 0 #fff, 0 5px 0 rgba(178,208,187,.22), 0 10px 20px rgba(44,100,74,.07); }
+.delivery-card[data-state="success"] .delivery-check { display: block; stroke-dasharray: 45; stroke-dashoffset: 45; animation: deliveryDraw .45s ease-out forwards; }
+.delivery-card[data-state="pending"] .delivery-pause, .delivery-card[data-state="error"] .delivery-cross { display: block; }
+.delivery-card:not([data-state="working"]) .delivery-rail::after { animation: none; width: 100%; background: var(--delivery-color); opacity: .5; }
+.delivery-card[data-state="pending"] .delivery-rail::after, .delivery-card[data-state="error"] .delivery-rail::after { width: 0; }
+#step3[data-delivery="working"] .recharge-confirmation, #step3[data-delivery="success"] .recharge-confirmation, #step3[data-delivery="pending"] .recharge-confirmation { display: none; }
+#step3[data-delivery="working"] #startRechargeBtn .btn-label::before { display: none; }
+@keyframes deliveryOrbit { to { transform: rotate(360deg); } }
+@keyframes deliveryBreathe { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes deliverySweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(350%); } }
+@keyframes deliveryDraw { to { stroke-dashoffset: 0; } }
+@media (max-width: 575px) { .delivery-card { padding: 1.1rem; } .delivery-milestones { gap: .1rem; } .delivery-milestones li { gap: .25rem; font-size: .625rem; } .delivery-title { font-size: 1.0625rem; } }
+@media (prefers-reduced-motion: reduce) { .delivery-card *, .delivery-card *::after { animation: none !important; } .delivery-card[data-state="success"] .delivery-check { stroke-dashoffset: 0; } .delivery-rail::after { transform: none; width: 100%; opacity: .35; } }
+
     </style>
 </head>
 <body>
@@ -422,11 +472,11 @@ body {
                                 </dl>
                                 <p class="confirmation-hint" id="confirmationHint">充值将绑定到以上组织 ID，请核对兑换码和账号信息，确认无误后再点击充值。</p>
                             </section>
+                            <div id="step3-result" class="mt-3"></div>
                             <button id="startRechargeBtn" type="button" class="btn btn-primary btn-lg w-100 btn-cta-pulse" data-loading-text="正在安全充值" style="font-weight: 600;">
                                 <span class="btn-label" id="startRechargeBtnText">确认无误，立即充值</span>
                             </button>
                             <button id="editAccountBtn" type="button" class="btn btn-outline-secondary w-100 confirmation-edit"><span class="btn-label">返回修改账号</span></button>
-                            <div id="step3-result" class="mt-3"></div>
                         </div>
                     </div>
 
@@ -465,7 +515,7 @@ body {
     <script src="/public/js/lang.js?v=20260524006"></script>
     <script>
         // ===================================================================
-        //  双后台：claude.hongyunai.pro + vip666ai.com
+        //  TangLang / vip666 / IPiap：仅通过 Worker 请求
         //  前端只访问 Worker；Worker 自动识别卡密所属后台并统一返回结构。
         // ===================================================================
         window.API_BASE = window.API_BASE || 'https://c.zlkjai.org/api/v1';
@@ -485,9 +535,16 @@ body {
             productName: '',
             orderNo: '',
             provider: '',
-            pollToken: ''
+            pollToken: '',
+            submittedAt: 0,
+            submissionUncertain: false,
+            submitted: false,
+            terminalFailed: false
         };
         let rechargeDone = false;
+        let rechargeRunning = false;
+        let deliveryTimer = null;
+        let deliveryStartedAt = 0;
 
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof initLanguage === 'function') initLanguage();
@@ -502,16 +559,17 @@ body {
             if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
             opts.headers = headers;
 
-            // 防止网络/上游异常时按钮永久停在 loading。默认 20 秒自动恢复。
+            // 提交订单单独使用 35 秒，长于 Worker 的上游超时，避免提前丢失受理结果。
             const timeoutMs = Number(opts.timeoutMs || 20000);
             delete opts.timeoutMs;
             const controller = new AbortController();
             const externalSignal = opts.signal;
-            const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const onExternalAbort = () => controller.abort();
             opts.signal = controller.signal;
             if (externalSignal) {
                 if (externalSignal.aborted) controller.abort(externalSignal.reason);
-                else externalSignal.addEventListener('abort', () => controller.abort(externalSignal.reason), { once: true });
+                else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
             }
 
             try {
@@ -527,11 +585,12 @@ body {
                 return { ok: res.ok, status: res.status, body };
             } catch (err) {
                 if (err && err.name === 'AbortError') {
-                    throw new Error('接口响应超时，请检查 Worker / 上游连接后重试');
+                    throw new Error('连接超时，暂未收到接口响应');
                 }
                 throw err;
             } finally {
                 clearTimeout(timer);
+                if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
             }
         }
 
@@ -563,8 +622,8 @@ body {
                 ? '充值已完成，可在下方查看本次充值结果。'
                 : '充值将绑定到以上组织 ID，请核对兑换码和账号信息，确认无误后再点击充值。';
             const editBtn = document.getElementById('editAccountBtn');
-            editBtn.style.display = rechargeDone ? 'none' : '';
-            editBtn.disabled = document.getElementById('startRechargeBtn').disabled;
+            editBtn.style.display = rechargeDone || (flow.submitted && !flow.terminalFailed) ? 'none' : '';
+            editBtn.disabled = rechargeRunning;
         }
 
         function goToStep(n) {
@@ -674,7 +733,8 @@ body {
             const startBtn = document.getElementById('startRechargeBtn');
 
             document.getElementById('editAccountBtn').addEventListener('click', function () {
-                if (rechargeDone || startBtn.disabled) return;
+                if (rechargeDone || rechargeRunning || (flow.submitted && !flow.terminalFailed)) return;
+                prepareTerminalRetry();
                 clearMsg('step2-result');
                 clearMsg('step3-result');
                 goToStep(2);
@@ -717,6 +777,10 @@ body {
                     flow.orderNo = '';
                     flow.provider = d.provider || b.provider || '';
                     flow.pollToken = '';
+                    flow.submittedAt = 0;
+                    flow.submissionUncertain = false;
+                    flow.submitted = false;
+                    flow.terminalFailed = false;
 
                     const info = document.getElementById('cardInfo');
                     if (info) info.textContent = '套餐：' + flow.productName;
@@ -742,163 +806,314 @@ body {
             });
 
             if (startBtn) startBtn.addEventListener('click', function () {
+                if (rechargeRunning) return;
                 if (rechargeDone) resetFlow();
+                else if (flow.terminalFailed) {
+                    prepareTerminalRetry();
+                    clearMsg('step3-result');
+                    goToStep(2);
+                }
+                else if (flow.submitted && !flow.orderNo) openUncertainCardQuery();
                 else runRedeem();
             });
         }
 
-        /* ---------- 双后台统一充值链：step2 -> step3 -> step4 轮询 -> saveRecord ---------- */
+
+        /* ---------- 发货状态：只更新状态内容，不反复重建动画 ---------- */
+        function ensureDeliveryCard() {
+            const host = document.getElementById('step3-result');
+            if (document.getElementById('deliveryCard')) return;
+            host.innerHTML = `
+                <section class="delivery-card" id="deliveryCard" data-state="working" aria-labelledby="deliveryTitle" aria-busy="true">
+                    <div class="delivery-topline"><span class="delivery-status-label" id="deliveryStatusLabel">正在为您处理</span><span class="delivery-elapsed" id="deliveryElapsed" aria-hidden="true">已用时 0 秒</span></div>
+                    <div class="delivery-art" aria-hidden="true"><div class="delivery-orbit"></div><div class="delivery-core">
+                        <svg class="delivery-spark" viewBox="0 0 40 40"><path d="M20 4v9m0 14v9M4 20h9m14 0h9M9 9l7 7m8 8 7 7M9 31l7-7m8-8 7-7M14 5l3 8m6 14 3 8M5 14l8 3m14 6 8 3M5 26l8-3m14-6 8-3M14 35l3-8m6-14 3-8"/></svg>
+                        <svg class="delivery-check" viewBox="0 0 40 40"><path d="m10 21 7 7 14-16"/></svg>
+                        <svg class="delivery-pause" viewBox="0 0 40 40"><path d="M15 12v16m10-16v16"/></svg>
+                        <svg class="delivery-cross" viewBox="0 0 40 40"><path d="m12 12 16 16m0-16L12 28"/></svg>
+                    </div></div>
+                    <div role="status" aria-live="polite" aria-atomic="true"><h3 class="delivery-title" id="deliveryTitle"></h3><p class="delivery-description" id="deliveryDescription"></p></div>
+                    <div class="delivery-rail" aria-hidden="true"></div>
+                    <ol class="delivery-milestones" aria-label="发货步骤"><li><i aria-hidden="true">1</i><span>信息核验</span></li><li><i aria-hidden="true">2</i><span>发货处理</span></li><li><i aria-hidden="true">3</i><span>到账确认</span></li></ol>
+                    <dl class="delivery-meta"><div><dt>套餐</dt><dd id="deliveryProduct"></dd></div><div><dt>组织 ID</dt><dd class="confirmation-code" id="deliveryAccount"></dd></div><div id="deliveryOrderRow" hidden><dt>订单号</dt><dd class="confirmation-code" id="deliveryOrder"></dd></div></dl>
+                    <p class="delivery-note" id="deliveryNote">请保留此页面，发货结果会自动更新。</p>
+                </section>`;
+        }
+
+        function stopDeliveryClock() {
+            clearInterval(deliveryTimer);
+            deliveryTimer = null;
+        }
+
+        function startDeliveryClock() {
+            stopDeliveryClock();
+            deliveryStartedAt = flow.submittedAt || Date.now();
+            const tick = () => {
+                const el = document.getElementById('deliveryElapsed');
+                if (el) el.textContent = '已用时 ' + Math.max(0, Math.floor((Date.now() - deliveryStartedAt) / 1000)) + ' 秒';
+            };
+            tick();
+            deliveryTimer = setInterval(tick, 1000);
+        }
+
+        function updateDelivery(state, stage, title, description, note) {
+            ensureDeliveryCard();
+            document.getElementById('step3').dataset.delivery = state;
+            const card = document.getElementById('deliveryCard');
+            card.dataset.state = state;
+            card.setAttribute('aria-busy', state === 'working' ? 'true' : 'false');
+            document.getElementById('deliveryStatusLabel').textContent = ({working:'正在为您处理', success:'发货已完成', pending:'等待结果确认', error:'需要您留意'})[state];
+            document.getElementById('deliveryTitle').textContent = title;
+            document.getElementById('deliveryDescription').textContent = description;
+            document.getElementById('deliveryNote').textContent = note || (state === 'working' ? '请保留此页面，发货结果会自动更新。' : '');
+            document.getElementById('deliveryProduct').textContent = flow.productName || 'Claude Pro';
+            document.getElementById('deliveryAccount').textContent = flow.claudeUserId;
+            document.getElementById('deliveryOrder').textContent = flow.orderNo;
+            document.getElementById('deliveryOrderRow').hidden = !flow.orderNo;
+            card.querySelectorAll('.delivery-milestones li').forEach((item, i) => {
+                const done = state === 'success' || i < stage;
+                const current = state !== 'success' && i === stage;
+                item.classList.toggle('is-done', done);
+                item.classList.toggle('is-current', current);
+                item.querySelector('i').textContent = done ? '✓' : String(i + 1);
+                if (current) item.setAttribute('aria-current', 'step');
+                else item.removeAttribute('aria-current');
+            });
+            if (state !== 'working') stopDeliveryClock();
+        }
+
+        function openUncertainCardQuery() {
+            const section = document.getElementById('querySection');
+            section.style.display = 'block';
+            document.getElementById('queryToggleIcon').textContent = '▲';
+            document.getElementById('queryCodesInput').value = flow.cdk;
+            section.scrollIntoView({behavior:'smooth', block:'center'});
+            document.getElementById('queryCodesInput').focus({preventScroll:true});
+        }
+
+        function setDeliveryDescription(text) {
+            const el = document.getElementById('deliveryDescription');
+            if (el && el.textContent !== text) el.textContent = text;
+        }
+
+        function prepareTerminalRetry() {
+            if (!flow.terminalFailed) return;
+            flow.submitted = false;
+            flow.orderNo = '';
+            flow.submittedAt = 0;
+            flow.submissionUncertain = false;
+            flow.terminalFailed = false;
+            delete document.getElementById('step3').dataset.delivery;
+            setRedeemButtonText('确认无误，立即充值');
+        }
+
+        function setRedeemButtonText(text) {
+            document.getElementById('startRechargeBtnText').textContent = text;
+        }
+
+        function finishDelivery() {
+            rechargeDone = true;
+            updateDelivery('success', 2, '充值成功，已为您送达', '会员充值已完成，现在可以前往 Claude 查看。', '如页面暂未更新，可刷新 Claude 后查看会员状态。');
+            setRedeemButtonText('返回首页 · 继续兑换');
+            // 展示成功不等待记录同步；回调只更新本订单的提示。
+            const completedOrder = flow.orderNo;
+            void saveUsageRecord({...flow}).then(saved => {
+                if (!saved && rechargeDone && flow.orderNo === completedOrder && document.getElementById('deliveryNote')) {
+                    document.getElementById('deliveryNote').textContent = '充值已完成，记录同步稍有延迟，不影响本次发货。';
+                }
+            });
+        }
+
+        /* ---------- 提交一次；待确认时按钮仅继续查询 ---------- */
         async function runRedeem() {
+            if (rechargeRunning) return;
             const btn = document.getElementById('startRechargeBtn');
             if (!flow.cdk || !flow.claudeUserId) {
                 showMsg('step3-result', 'error', '缺少充值码或 Claude 用户 ID，请返回上一步重试。');
                 return;
             }
-
-            setBtnLoading(btn, true, '正在安全充值');
+            if (flow.submitted && !flow.orderNo) { openUncertainCardQuery(); return; }
+            rechargeRunning = true;
+            setBtnLoading(btn, true, flow.orderNo ? '正在查询发货结果' : '正在为您充值');
             btn.classList.remove('btn-cta-pulse');
             renderRechargeConfirmation();
+            ensureDeliveryCard();
+            startDeliveryClock();
+            let stage = flow.orderNo ? 2 : 0;
 
             try {
-                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>正在验证 Claude 账号…');
+                if (!flow.orderNo) {
+                    updateDelivery('working', 0, '正在核验充值信息', '核对账号信息，为本次充值做好准备。');
+                    // TangLang / vip666 的 step2 只有 UUID 格式校验，本地已完成；IPiap 仍保留上游预检。
+                    if (!['hongyun', 'tanglang', 'vip666'].includes(flow.provider)) {
+                        const r2 = await apiFetch(API.step2, {
+                            method: 'POST',
+                            body: JSON.stringify({organizationId: flow.claudeUserId, serialNumber: flow.cdk, provider: flow.provider})
+                        });
+                        if (!r2.ok || !isBizSuccess(r2.body)) throw new Error(getErrorMessage(r2, '账号校验失败'));
+                    }
 
-                const r2 = await apiFetch(API.step2, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk,
-                        provider: flow.provider
-                    })
-                });
-                if (!r2.ok || !isBizSuccess(r2.body)) {
-                    throw new Error(getErrorMessage(r2, '账号校验失败'));
+                    stage = 1;
+                    updateDelivery('working', 1, '正在提交会员充值', '充值信息已核对，正在等待发货受理。');
+                    flow.submittedAt = Date.now();
+                    flow.submitted = true;
+                    let r3;
+                    try {
+                        r3 = await apiFetch(API.step3, {
+                            method:'POST', timeoutMs:35000,
+                            body:JSON.stringify({organizationId:flow.claudeUserId, serialNumber:flow.cdk, provider:flow.provider, recharge_mode:'claude_org', confirm_overwrite:false})
+                        });
+                    } catch (err) {
+                        flow.submissionUncertain = true;
+                        if (['hongyun', 'tanglang'].includes(flow.provider)) flow.orderNo = flow.cdk;
+                        else throw err;
+                    }
+
+                    if (r3) {
+                        const b3 = r3.body || {};
+                        const d3 = b3.data || {};
+                        flow.provider = d3.provider || b3.provider || flow.provider;
+                        flow.pollToken = d3.pollToken || d3.poll_token || b3.pollToken || b3.poll_token || '';
+                        if (!r3.ok || !isBizSuccess(b3)) {
+                            // 5xx / 网关响应不能证明提交失败；先查询，绝不自动重发兑换。
+                            if (r3.status >= 500 || r3.status === 408 || b3.error === 'invalid_json') {
+                                flow.submissionUncertain = true;
+                                if (['hongyun', 'tanglang'].includes(flow.provider)) flow.orderNo = flow.cdk;
+                                else throw new Error(getErrorMessage(r3, '提交结果暂未确认'));
+                            } else {
+                                flow.submitted = false;
+                                flow.submittedAt = 0;
+                                throw new Error(getErrorMessage(r3, '充值未受理'));
+                            }
+                        } else {
+                            flow.orderNo = String(d3.orderNo || d3.order_no || b3.orderNo || b3.order_no || '');
+                            flow.submissionUncertain = d3.submissionUncertain === true;
+                            const immediateStatus = Number(d3.orderStatus != null ? d3.orderStatus : b3.orderStatus);
+                            if (immediateStatus === 2) { finishDelivery(); return; }
+                            if (immediateStatus === 3) {
+                                flow.terminalFailed = true;
+                                updateDelivery('error', 1, '本次充值未完成', d3.message || b3.message || '上游返回发货失败，请查询卡密状态或联系客服。');
+                                setRedeemButtonText('核对信息后重新充值');
+                                return;
+                            }
+                            if (d3.possibleSuccess === true || d3.taskStatus === 'possible_success') {
+                                updateDelivery('pending', 2, '到账状态待核实', '服务返回可能已到账，请先前往 Claude 核对会员状态。', '暂未确认充值成功，请勿重复提交；可继续查询本订单。');
+                                setRedeemButtonText(flow.orderNo ? '继续查询发货结果' : '查询本次卡密状态');
+                                return;
+                            }
+                            if (!flow.orderNo) {
+                                flow.submissionUncertain = true;
+                                if (['hongyun', 'tanglang'].includes(flow.provider)) flow.orderNo = flow.cdk;
+                                else throw new Error('充值已提交，但暂未收到订单查询信息，请先查询卡密状态。');
+                            }
+                        }
+                    }
                 }
 
-                showMsg('step3-result', 'info', '<span class="spinner-border spinner-border-sm me-2"></span>账号验证通过，正在生成充值订单…');
-
-                const r3 = await apiFetch(API.step3, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        organizationId: flow.claudeUserId,
-                        serialNumber: flow.cdk,
-                        provider: flow.provider,
-                        recharge_mode: 'claude_org',
-                        confirm_overwrite: false
-                    })
-                });
-                if (!r3.ok || !isBizSuccess(r3.body)) {
-                    throw new Error(getErrorMessage(r3, '生成订单失败'));
-                }
-
-                const b3 = r3.body || {};
-                const d3 = b3.data || {};
-                const orderNo = d3.orderNo || d3.order_no || b3.orderNo || b3.order_no || '';
-                if (!orderNo) throw new Error('生成订单成功，但接口未返回 orderNo');
-
-                flow.orderNo = String(orderNo);
-                flow.provider = d3.provider || flow.provider || b3.provider || '';
-                flow.pollToken = d3.pollToken || d3.poll_token || b3.pollToken || b3.poll_token || '';
+                stage = 2;
+                updateDelivery('working', 2, '正在确认会员到账', flow.submissionUncertain ? '提交结果暂未确认，正在查询本次充值，请勿重复提交。' : '充值已受理，到账后会立即在这里通知您。');
                 const fin = await pollOrderResult(flow.orderNo);
-
-                if (fin.ok) {
-                    // 与新后台原页面一致：step4 成功后调用 saveRecord。
-                    const saved = await saveUsageRecord();
-                    const recordTip = saved ? '' : '<br><span style="font-size:.78rem;opacity:.8;">充值已成功，但本地使用记录同步暂未确认。</span>';
-
-                    showMsg('step3-result', 'success',
-                        '<strong>✅ 充值成功!</strong>' +
-                        '<div style="margin-top:.45rem;font-size:.85rem;">' +
-                        '套餐：' + escapeHtml(flow.productName || 'Claude Pro') + '<br>' +
-                        '账号：' + escapeHtml(flow.claudeUserId) + '<br>' +
-                        '订单号：' + escapeHtml(flow.orderNo) + recordTip +
-                        '</div>');
-
-                    rechargeDone = true;
-                    const btnText = document.getElementById('startRechargeBtnText');
-                    if (btnText) btnText.textContent = '🔄 返回首页 · 重新兑换';
-                    btn.classList.add('btn-cta-pulse');
-                    return;
-                }
-
-                if (fin.failed) {
-                    showMsg('step3-result', 'error', '❌ 发货失败：' + escapeHtml(fin.reason || '订单状态为失败') + '。');
+                if (fin.ok) { finishDelivery(); return; }
+                if (fin.possible) {
+                    updateDelivery('pending', 2, '到账状态待核实', '服务返回可能已到账，请先前往 Claude 核对会员状态。', '暂未确认充值成功，请勿重复提交；可继续查询本订单。');
+                } else if (fin.failed) {
+                    flow.terminalFailed = true;
+                    updateDelivery('error', 2, '本次充值未完成', fin.reason || '发货未成功，请查询卡密状态或联系客服核对。', '请核对账号信息，确认无误后可重新尝试。');
                 } else {
-                    showMsg('step3-result', 'error',
-                        '⌛ 订单仍在处理中，75 秒内未确认完成。订单号：' + escapeHtml(flow.orderNo) +
-                        '。请稍后用卡密查询功能确认，或联系客服核对。');
+                    updateDelivery('pending', 2, '发货结果待确认', fin.reason ? '暂时无法确认到账结果，请稍后继续查询。' : '本次充值仍在处理中，您可以继续查询发货结果。', '订单已保留，继续查询不会重复提交充值。');
                 }
+                setRedeemButtonText(flow.terminalFailed ? '核对信息后重新充值' : '继续查询发货结果');
             } catch (err) {
-                showMsg('step3-result', 'error', '❌ 中止：' + escapeHtml(err.message));
+                if (flow.submitted) {
+                    updateDelivery('pending', stage, '提交结果待确认', '暂未收到完整的充值结果，请先查询卡密状态或联系客服核对。', '为避免重复充值，本页不会自动重新提交。');
+                    setRedeemButtonText(flow.orderNo ? '继续查询发货结果' : '查询本次卡密状态');
+                } else {
+                    updateDelivery('error', stage, '暂时未能开始充值', err.message || '请稍后重试。', '您可以返回核对信息后重试。');
+                    setRedeemButtonText('重新尝试充值');
+                }
             } finally {
+                stopDeliveryClock();
+                rechargeRunning = false;
                 setBtnLoading(btn, false);
                 renderRechargeConfirmation();
             }
         }
 
         async function pollOrderResult(orderNo) {
-            const maxPolls = 25;
-            const interval = 3000;
+            // 按真实时间限时：TangLang 自动重试窗口约 25 分钟；立即首查，随后逐步放缓。
+            const isTangLang = ['hongyun', 'tanglang'].includes(flow.provider);
+            const deadline = Date.now() + (isTangLang ? 1500000 : 120000);
+            const startedAt = Date.now();
+            let consecutiveErrors = 0;
             let lastError = '';
-
-            for (let i = 1; i <= maxPolls; i++) {
-                showMsg('step3-result', 'info',
-                    '<span class="spinner-border spinner-border-sm me-2"></span>系统正在极速发货，请勿关闭页面…（' + i + '/' + maxPolls + '）');
-
+            while (Date.now() < deadline) {
                 try {
                     const r = await apiFetch(API.step4, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            orderNo: orderNo,
-                            provider: flow.provider,
-                            pollToken: flow.pollToken
-                        })
+                        method:'POST', timeoutMs:Math.min(30000, deadline - Date.now()),
+                        body:JSON.stringify({orderNo, provider:flow.provider, pollToken:flow.pollToken, submittedAt:flow.submittedAt, submissionUncertain:flow.submissionUncertain})
                     });
                     const b = r.body || {};
                     const d = b.data || {};
                     const status = Number(d.orderStatus != null ? d.orderStatus : b.orderStatus);
-
-                    if (isBizSuccess(b) && status === 2) return { ok: true, body: b };
-                    if (status === 3) {
-                        return { failed: true, reason: b.msg || b.message || '发货失败', body: b };
+                    if (r.ok && isBizSuccess(b)) {
+                        if (status === 2) return {ok:true, body:b};
+                        if (status === 3) return {failed:true, reason:d.message || b.msg || b.message || '发货失败', body:b};
+                        if (d.possibleSuccess === true || d.taskStatus === 'possible_success') return {possible:true};
+                        if (d.retried) {
+                            setDeliveryDescription('本次充值正在重新处理' + (Number(d.attempt) > 1 ? '（第 ' + Number(d.attempt) + ' 次）' : '') + '，请等待到账确认。');
+                        }
+                        consecutiveErrors = 0;
+                        lastError = '';
+                    } else {
+                        lastError = getErrorMessage(r, '暂未查询到发货结果');
+                        consecutiveErrors++;
                     }
-                    if (!r.ok) lastError = getErrorMessage(r, '查询订单状态失败');
                 } catch (err) {
                     lastError = err.message;
+                    consecutiveErrors++;
                 }
-
-                if (i < maxPolls) await sleep(interval);
+                if (consecutiveErrors >= 3) return {timeout:true, reason:lastError};
+                const elapsed = Date.now() - startedAt;
+                if (elapsed >= 30000 && !document.getElementById('deliveryDescription').textContent.includes('重新处理')) {
+                    setDeliveryDescription('发货处理比平时稍久，正在为您持续查询。');
+                }
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) break;
+                const delay = consecutiveErrors ? 3000 : (elapsed < 12000 ? 1000 : (elapsed < 120000 ? 2500 : 5000));
+                await sleep(Math.min(delay, remaining));
             }
-            return { timeout: true, reason: lastError };
+            return {timeout:true, reason:lastError};
         }
 
-        async function saveUsageRecord() {
-            for (let i = 0; i < 3; i++) {
+        async function saveUsageRecord(record) {
+            for (let i = 0; i < 2; i++) {
                 try {
                     const r = await apiFetch(API.saveRecord, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            serialNumber: flow.cdk,
-                            organizationId: flow.claudeUserId,
-                            provider: flow.provider,
-                            pollToken: flow.pollToken
-                        })
+                        method:'POST', timeoutMs:8000,
+                        body:JSON.stringify({serialNumber:record.cdk, organizationId:record.claudeUserId, provider:record.provider, pollToken:record.pollToken})
                     });
-                    // saveRecord 的原页面没有检查业务 code；HTTP 可达即视为已提交。
-                    if (r.ok) return true;
-                } catch (e) { /* 重试 */ }
-                if (i < 2) await sleep(800);
+                    if (r.ok && isBizSuccess(r.body)) return true;
+                } catch (e) { /* 只重试记录同步，不重发兑换。 */ }
+                if (i === 0) await sleep(800);
             }
             return false;
         }
 
         function resetFlow() {
+            stopDeliveryClock();
+            delete document.getElementById('step3').dataset.delivery;
             rechargeDone = false;
+            rechargeRunning = false;
             flow.cdk = '';
             flow.claudeUserId = '';
             flow.productName = '';
             flow.orderNo = '';
             flow.provider = '';
             flow.pollToken = '';
+            flow.submittedAt = 0;
+            flow.submissionUncertain = false;
+            flow.submitted = false;
+            flow.terminalFailed = false;
 
             const cc = document.getElementById('cardCode');
             const cu = document.getElementById('claudeUserId');
