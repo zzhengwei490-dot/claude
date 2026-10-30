@@ -1,1206 +1,1960 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Claude Pro 充值系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="/public/css/mobile-fix.css?v=20260530003" rel="stylesheet">
-    <style>
-        :root {
-            --claude-bg: #FCFBF7;
-            --claude-primary: #CC785C;
-            --claude-primary-dark: #A85D47;
-            --claude-text: #2B2118;
-            --claude-text-light: #8B7355;
-            --claude-border: #ECE7DA;
-            --claude-card-bg: #FFFFFF;
-            --claude-surface: #F7F3EA;
-            --claude-success: #10A37F;
-            --claude-warning: #F59E0B;
-            --claude-danger: #EF4444;
-            --brand-accent: #CC785C;
-            --shadow-primary: rgba(204, 120, 92, 0.10);
-            --shadow-primary-strong: rgba(204, 120, 92, 0.22);
-            --brand-gradient: linear-gradient(135deg, #E89B7F 0%, #CC785C 100%);
-            --brand-gradient-soft: linear-gradient(135deg, #FFF8F0 0%, #FBEEDF 100%);
+/**
+ * Claude 充值代理 Worker - TangLang + vip666 + IPiap 三后台完整版
+ *
+ * 后台 A：TangLang https://tanglang123.applelll.com/
+ * 后台 B：https://vip666ai.com/
+ * 后台 C：https://ipiap.com/
+ *
+ * 说明：
+ * 1) 前端业务接口仍通过本 Worker；Turnstile 使用 Cloudflare 官方浏览器脚本。
+ * 2) step1 自动识别卡密所属后台；后续步骤由 provider 跟随。
+ * 3) vip666ai 的订单查询需要 Set-Cookie + X-Order-Query-Token，Worker 会在 step3
+ *    把这两项封装成 pollToken，step4 再自动还原并向上游查询。
+ * 4) vip666 卡密查询已接入 query-challenge -> verify -> query-batch 人机验证流程；验证通过后约 2 小时复用。
+ * 5) 后台 A 已完整改为 TangLang；对前端仍保留 provider=hongyun 作为兼容别名。
+ * 6) IPiap 已接入 step1/step2/step3/step4 + card-query。
+ * 7) TangLang 直接识别 step3 最终结果；提交响应不明确时只查询原 CDK，绝不自动重复兑换。
+ * 8) step4 可传 submittedAt（提交时间毫秒）和 submissionUncertain，避免刚提交时状态同步延迟被误判失败。
+ * 9) 上游会自动换号重试，前端应保留较长查询窗口；possible_success 只表示待确认。
+ * 10) TangLang 支持 Organization ID / SessionKey；Turnstile token 由浏览器生成并仅透传上游验证。
+ * 11) recharge-config 返回上游验证配置；上游需授权实际前端域名使用其 Turnstile site key。
+ *
+ * 可选环境变量：
+ *   ALLOW_ORIGIN       允许访问 Worker 的前端来源，例如 https://claude.zlkjgptplus.org
+ *                      留空默认为 *
+ *   TANGLANG_BASE     TangLang 上游，默认 https://tanglang123.applelll.com/
+ *   TANGLANG_REF       TangLang 店铺 ref，默认 tanglang123
+ *   TANGLANG_PRODUCT_ID 商品 ID，默认 8
+ *   VIP666_BASE        vip666ai 上游，默认 https://vip666ai.com
+ *   IPIAP_BASE         IPiap 上游，默认 https://ipiap.com
+ *   IPIAP_COOKIE       可选；若 IPiap Cloudflare 校验要求浏览器 Cookie，可临时配置
+ *   IPIAP_DID          可选；对应请求头 Did
+ *   IPIAP_AID          可选；对应请求头 Aid
+ *   IPIAP_SYS_TOKEN    可选；对应请求头 Sys-Token
+ *   POLL_SECRET        可选。设置后会给 pollToken 加 HMAC 签名，生产环境建议配置随机长字符串。
+ *
+ * 前端 API_BASE：
+ *   window.API_BASE = 'https://你的worker域名/api/v1';
+ */
+
+const DEFAULT_HONGYUN_UPSTREAM = "https://tanglang123.applelll.com";
+const DEFAULT_VIP666_BASE = "https://vip666ai.com";
+const DEFAULT_IPIAP_BASE = "https://ipiap.com";
+const DEFAULT_TANGLANG_REF = "tanglang123";
+const DEFAULT_TANGLANG_PRODUCT_ID = 8;
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
+
+const API_PREFIX = "/api/v1/claude/";
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const CLAUDE_SESSION_RE = /^sk-ant-sid\d+-[A-Za-z0-9_-]+$/;
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const origin = request.headers.get("Origin") || "";
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: cors(origin, env) });
+    }
+
+    if (url.pathname === "/" || url.pathname === "/health") {
+      return json({
+        ok: true,
+        service: "claude-tanglang-vip666-proxy",
+        version: 10,
+        backends: {
+          tanglang: getTangLangBase(env),
+          vip666: getVip666Base(env),
+          ipiap: getIpiapBase(env),
+        },
+        routes: [
+          API_PREFIX + "recharge-config",
+          API_PREFIX + "step1",
+          API_PREFIX + "step2",
+          API_PREFIX + "step3",
+          API_PREFIX + "step4",
+          API_PREFIX + "save-record",
+          API_PREFIX + "card-query",
+          API_PREFIX + "card-query-challenge",
+          API_PREFIX + "card-query-verify",
+        ],
+      }, 200, origin, env);
+    }
+
+    if (!url.pathname.startsWith(API_PREFIX)) {
+      return json({ error: "not_found", path: url.pathname }, 404, origin, env);
+    }
+
+    if (request.method !== "POST") {
+      return json(
+        { error: "method_not_allowed", message: "该接口仅允许 POST" },
+        405,
+        origin,
+        env,
+        { Allow: "POST, OPTIONS" }
+      );
+    }
+
+    let input;
+    try {
+      const raw = await request.text();
+      input = raw.trim() ? JSON.parse(raw) : {};
+    } catch (_) {
+      return json({ error: "invalid_json", message: "请求体必须是合法 JSON" }, 400, origin, env);
+    }
+
+    try {
+      let result;
+      switch (url.pathname) {
+        case API_PREFIX + "recharge-config":
+          result = await handleRechargeConfig(env);
+          break;
+        case API_PREFIX + "step1":
+          result = await handleStep1(input, env);
+          break;
+        case API_PREFIX + "step2":
+          result = await handleStep2(input, env);
+          break;
+        case API_PREFIX + "step3":
+          result = await handleStep3(input, env);
+          break;
+        case API_PREFIX + "step4":
+          result = await handleStep4(input, env);
+          break;
+        case API_PREFIX + "save-record":
+          result = await handleSaveRecord(input, env);
+          break;
+        case API_PREFIX + "card-query":
+          result = await handleCardQuery(input, env);
+          break;
+        case API_PREFIX + "card-query-challenge":
+          result = await handleCardQueryChallenge(input, env);
+          break;
+        case API_PREFIX + "card-query-verify":
+          result = await handleCardQueryVerify(input, env);
+          break;
+        default:
+          return json({ error: "not_found", path: url.pathname }, 404, origin, env);
+      }
+
+      return json(result.body, result.status || 200, origin, env, result.headers || {});
+    } catch (err) {
+      return json({
+        error: "worker_error",
+        message: err && err.message ? err.message : String(err),
+      }, 500, origin, env);
+    }
+  },
+};
+
+/* ============================= 路由处理 ============================= */
+
+async function handleStep1(input, env) {
+  const code = cleanCode(input.serialNumber || input.code || input.card_code || "");
+  if (!code) return bad("请输入充值码");
+
+  const forced = normalizeProvider(input.provider);
+
+  // IPiap：截图确认 POST /app/recharge/step1
+  // body: {"serialNumber":"..."}
+  if (forced === "ipiap" || (!forced && looksLikeIpiapCode(code))) {
+    const r = await ipiapStep1(code, env);
+
+    if (r.ok && isBizSuccess(r.json)) {
+      const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+      return ok({
+        valid: true,
+        productName: d.productName || d.product_name || "Claude Pro - Monthly",
+        productCode: d.platform || "claude",
+        expiredTime: d.expiredTime || d.expired_time || "",
+        customerService: d.customerService || d.customer_service || "",
+        rechargeUrl: d.rechargeUrl || d.recharge_url || null,
+        gameName: d.gameName || d.game_name || null,
+        productPrice: d.productPrice || d.product_price || null,
+        provider: "ipiap",
+        upstreamProvider: "ipiap",
+      });
+    }
+
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: {
+        code: businessCode(r.json, 1002),
+        message: businessMessage(r.json, "IPiap 充值码无效、已使用或不可用"),
+        data: r.json && r.json.data ? r.json.data : null,
+      },
+    };
+  }
+
+  // vip666 卡密沿用原后台。
+  if (forced === "vip666" || (!forced && looksLikeVip666Code(code))) {
+    const r = await vipProbe(code, env);
+    if (r.success) {
+      return ok({
+        valid: true,
+        productName: r.data.product_name || r.data.productName || "Claude Pro",
+        productCode: r.data.product_code || r.data.productCode || "claude_pro",
+        provider: "vip666",
+      });
+    }
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: {
+        code: businessCode(r.json, 1002),
+        message: r.reason || "充值码无效或已使用",
+        data: r.json && r.json.data ? r.json.data : null,
+      },
+    };
+  }
+
+  // 其余默认走 TangLang（后台 A）。
+  const tr = await tanglangGetStatus(code, env);
+  if (!tr.ok || !tr.json) {
+    return {
+      status: normalizeHttpErrorStatus(tr.status),
+      body: {
+        code: tr.status || 502,
+        message: tanglangMessage(tr.json, "TangLang 卡密验证失败"),
+        data: null,
+      },
+    };
+  }
+
+  const d = tr.json && typeof tr.json === "object" ? tr.json : {};
+  if (d.found === false) {
+    return { status: 400, body: { code: 1002, message: "充值码无效", data: null } };
+  }
+
+  const st = String(d.status || "").toLowerCase();
+  const ts = String(d.task_status || "").toLowerCase();
+
+  if (st === "active") {
+    return ok({
+      valid: true,
+      productName: d.product_name || "Claude Pro",
+      productCode: "claude_pro",
+      productId: Number(d.product_id || getTanglangProductId(env)),
+      // 兼容旧前端：后台 A 历史 provider 名称是 hongyun。
+      provider: "hongyun",
+      upstreamProvider: "tanglang",
+      rawStatus: st,
+    });
+  }
+
+  if (st === "redeemed" || ts === "success") {
+    return { status: 409, body: { code: 409, message: "该 CDK 已兑换", data: tanglangCompatData(d) } };
+  }
+
+  if (st === "redeeming" || ["pending", "processing", "running", "queued"].includes(ts)) {
+    return { status: 409, body: { code: 409, message: "该 CDK 正在兑换中，请稍后查询", data: tanglangCompatData(d) } };
+  }
+
+  return {
+    status: 400,
+    body: {
+      code: 400,
+      message: tanglangMessage(d, "该 CDK 当前不可用"),
+      data: tanglangCompatData(d),
+    },
+  };
+}
+
+async function handleStep2(input, env) {
+  const provider = normalizeProvider(input.provider) || "hongyun";
+  const credentials = claudeCredentials(input, provider);
+  if (credentials.error) return bad(credentials.error);
+  if (credentials.mode === "claude_session") {
+    // 这里只确认输入格式；真实账号识别由上游在兑换前执行，不能声称已校验账号。
+    return ok({ valid: true, formatOnly: true, rechargeMode: "claude_session", provider: "hongyun", upstreamProvider: "tanglang" });
+  }
+  const uid = String(input.organizationId || input.account_id || "").trim();
+  if (!UUID_RE.test(uid)) return bad("Claude 用户 ID 格式不正确");
+
+  if (provider === "vip666") {
+    return ok({ valid: true, organizationId: uid, provider: "vip666" });
+  }
+
+  if (provider === "ipiap") {
+    return ipiapStep2(uid, env);
+  }
+
+  // TangLang 没有独立账号预检接口；格式检查通过后，真正校验在 /api/store/redeem 完成。
+  return ok({ valid: true, organizationId: uid, provider: "hongyun", upstreamProvider: "tanglang" });
+}
+
+async function handleStep3(input, env) {
+  const provider = normalizeProvider(input.provider) || inferProviderFromCode(input.serialNumber || input.card_code || "");
+  const code = cleanCode(input.serialNumber || input.card_code || input.code || "");
+  const uid = String(input.organizationId || input.account_id || "").trim();
+  if (!code) return bad("缺少充值码");
+  const credentials = claudeCredentials(input, provider);
+  if (credentials.error) return bad(credentials.error);
+  if (credentials.mode !== "claude_session" && !UUID_RE.test(uid)) return bad("Claude 用户 ID 格式不正确");
+
+  if (provider === "vip666") {
+    return vipRedeem(code, uid, input, env);
+  }
+
+  if (provider === "ipiap") {
+    return ipiapRedeem(code, uid, env);
+  }
+
+  return tanglangRedeem(code, credentials.mode === "claude_session" ? "" : uid, input, env);
+}
+
+function claudeCredentials(input, provider) {
+  const mode = String(input.recharge_mode || "claude_org");
+  const sessionKey = typeof input.session_key === "string" ? input.session_key.trim() : "";
+  if (!["claude_org", "claude_session"].includes(mode)) return { error: "不支持的充值方式" };
+  if ((mode === "claude_session" || sessionKey) && provider !== "hongyun") {
+    return { error: "此卡密暂不支持 SessionKey，请使用 Organization ID" };
+  }
+  if (mode === "claude_session") {
+    if (!CLAUDE_SESSION_RE.test(sessionKey) || sessionKey.length > 8192) {
+      return { error: "请输入 sk-ant-sid 开头的 Claude SessionKey，不能使用 API Key" };
+    }
+    if (String(input.organizationId || input.account_id || "").trim()) {
+      return { error: "SessionKey 与 Organization ID 只能选择一种方式" };
+    }
+  } else if (sessionKey) {
+    return { error: "请先选择 SessionKey 充值方式" };
+  }
+  return { mode, sessionKey };
+}
+
+async function handleStep4(input, env) {
+  const provider = normalizeProvider(input.provider) || (input.pollToken ? "vip666" : "hongyun");
+  const orderNo = String(input.orderNo || input.order_no || input.serialNumber || input.card_code || "").trim();
+  if (!orderNo) return bad("缺少订单号/卡密");
+
+  if (provider === "vip666") {
+    return vipOrderQuery(orderNo, input.pollToken || input.poll_token || "", env);
+  }
+
+  if (provider === "ipiap") {
+    return ipiapOrderQuery(orderNo, env);
+  }
+
+  // TangLang 的轮询键就是 CDK。step3 为兼容旧前端把 CDK 放进 orderNo。
+  const code = cleanCode(orderNo.replace(/^TL:/i, ""));
+  return tanglangOrderQuery(code, env, input);
+}
+
+async function handleSaveRecord(input, env) {
+  const provider = normalizeProvider(input.provider) || inferProviderFromCode(input.serialNumber || "");
+  if (provider === "vip666") {
+    return ok({ saved: true, provider: "vip666", skipped: true });
+  }
+
+  if (provider === "ipiap") {
+    return ok({ saved: true, provider: "ipiap", upstreamProvider: "ipiap", skipped: true });
+  }
+
+  // TangLang 的 redeem 接口本身即保存记录，不再调用原 HongYun saveRecord。
+  return ok({ saved: true, provider: "hongyun", upstreamProvider: "tanglang", skipped: true });
+}
+
+async function handleCardQueryChallenge(input, env) {
+  const r = await vipQueryChallenge(env);
+  const challengeId = findChallengeId(r.json, r.headers);
+  const image = findChallengeImage(r.json);
+  const cookieHeader = String(r.cookieHeader || responseCookieHeader(r.headers) || "");
+
+  // challenge 接口只要 HTTP 成功且能取到 challengeId + 图片即可；兼容上游不返回 code 字段的情况。
+  if (!r.ok) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: r.json || { code: r.status || 502, message: "vip666ai 验证码获取失败" },
+    };
+  }
+
+  if (!challengeId || !image || !cookieHeader) {
+    return {
+      status: 502,
+      body: {
+        code: 502,
+        message: "vip666ai 验证码响应不完整，请重新获取",
+        data: {
+          hasChallengeId: Boolean(challengeId),
+          hasImage: Boolean(image),
+          hasCookie: Boolean(cookieHeader),
+        },
+      },
+    };
+  }
+
+  const challengeToken = await makePollToken({
+    p: "vip666_query_challenge",
+    challengeId,
+    cookieHeader,
+    exp: Date.now() + 10 * 60 * 1000,
+  }, env);
+
+  return ok({
+    challengeId,
+    image,
+    challengeToken,
+    expiresIn: 600,
+    provider: "vip666",
+  });
+}
+
+async function handleCardQueryVerify(input, env) {
+  const challengeId = String(input.challengeId || input.challenge_id || "").trim();
+  const challengeToken = String(input.challengeToken || input.challenge_token || "").trim();
+  const answer = String(input.answer || input.code || input.captcha || "").trim();
+
+  if (!challengeId) return bad("缺少 challengeId");
+  if (!challengeToken) return bad("缺少 challengeToken");
+  if (!answer) return bad("请输入验证码");
+
+  let state;
+  try {
+    state = await readPollToken(challengeToken, env);
+  } catch (err) {
+    return { status: 400, body: { code: 400, message: "验证码会话无效：" + err.message } };
+  }
+
+  if (state.p !== "vip666_query_challenge") return bad("验证码会话类型不匹配");
+  if (state.exp && Date.now() > Number(state.exp)) return bad("验证码已过期，请刷新验证码");
+  if (String(state.challengeId || "") !== challengeId) return bad("challengeId 与验证码会话不匹配");
+
+  const r = await vipVerifyQueryChallenge(challengeId, answer, state.cookieHeader || "", env);
+  const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  const verified = d.verified === true || d.verify === true || d.passed === true;
+
+  if (!r.ok || !isBizSuccess(r.json) || !verified) {
+    const body = r.json && typeof r.json === "object" ? cloneObject(r.json) : {};
+    if (!verified && /^(ok|success|成功)?$/i.test(String(body.message || body.msg || ""))) {
+      body.message = "验证码错误或已过期";
+      body.msg = "验证码错误或已过期";
+    }
+    if (body.code == null || body.code === 0 || body.code === "0") body.code = 400;
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: Object.keys(body).length ? body : { code: r.status || 400, message: "验证码错误或已过期" },
+    };
+  }
+
+  const cookieHeader = mergeCookieHeader(
+    state.cookieHeader || "",
+    responseCookieHeader(r.headers)
+  );
+  const rememberSeconds = Math.max(60, Number(d.remember_seconds || d.rememberSeconds || 7200) || 7200);
+
+  const querySessionToken = await makePollToken({
+    p: "vip666_query_session",
+    cookieHeader,
+    exp: Date.now() + rememberSeconds * 1000,
+  }, env);
+
+  return ok({
+    verified: true,
+    rememberSeconds,
+    remember_seconds: rememberSeconds,
+    querySessionToken,
+    provider: "vip666",
+  });
+}
+
+function verificationRequired(message) {
+  return {
+    status: 428,
+    body: {
+      code: 428,
+      message: message || "vip666ai 查询需要先完成人机验证",
+      data: { needVerification: true, provider: "vip666" },
+    },
+  };
+}
+
+async function readVipQuerySession(token, env) {
+  if (!token) return { ok: false, reason: "vip666ai 查询需要先完成人机验证" };
+  try {
+    const state = await readPollToken(token, env);
+    if (state.p !== "vip666_query_session") return { ok: false, reason: "查询验证会话类型不匹配" };
+    if (state.exp && Date.now() > Number(state.exp)) return { ok: false, reason: "查询验证已过期，请重新验证" };
+    if (!state.cookieHeader) return { ok: false, reason: "查询验证凭据缺失，请重新验证" };
+    return { ok: true, cookieHeader: String(state.cookieHeader) };
+  } catch (err) {
+    return { ok: false, reason: "查询验证会话无效，请重新验证" };
+  }
+}
+
+async function handleCardQuery(input, env) {
+  const codes = Array.isArray(input.codes)
+    ? input.codes.map(cleanCode).filter(Boolean)
+    : [];
+
+  if (!codes.length) return bad("请输入要查询的卡密");
+  if (codes.length > 200) return bad("单次最多查询 200 个卡密");
+
+  // 自动识别：
+  // CLAUDEPRO-* -> vip666
+  // CP...-*      -> IPiap（当前截图中的 CPSV / CPQF / CPN2 均属此类）
+  // 其它         -> TangLang
+  const vipCodes = [];
+  const ipiapCodes = [];
+  const tangCodes = [];
+
+  for (const code of codes) {
+    if (looksLikeVip666Code(code)) vipCodes.push(code);
+    else if (looksLikeIpiapCode(code)) ipiapCodes.push(code);
+    else tangCodes.push(code);
+  }
+
+  let vipCookieHeader = "";
+  if (vipCodes.length) {
+    const sessionToken = String(input.querySessionToken || input.query_session_token || "").trim();
+    const auth = await readVipQuerySession(sessionToken, env);
+    if (!auth.ok) return verificationRequired(auth.reason);
+    vipCookieHeader = auth.cookieHeader;
+  }
+
+  const results = new Map();
+
+  // IPiap 批量查询：POST /app/recharge/cardQuery
+  // body: {"codes":["...","..."]}
+  if (ipiapCodes.length) {
+    const r = await ipiapCardQuery(ipiapCodes, env);
+    const list = r.json && Array.isArray(r.json.data) ? r.json.data : [];
+
+    if (r.ok && isBizSuccess(r.json) && Array.isArray(list)) {
+      for (const raw of list) {
+        const item = normalizeIpiapQueryItem(raw);
+        if (item.code) results.set(item.code, item);
+      }
+
+      // 上游漏项：不要误报未使用
+      for (const code of ipiapCodes) {
+        if (!results.has(code)) {
+          results.set(code, {
+            code,
+            status: 9,
+            message: "IPiap 未返回该卡密结果",
+            productName: "Claude Pro - Monthly",
+            provider: "ipiap",
+            upstreamProvider: "ipiap",
+          });
         }
-
-/* Claude finish: the original palette, with Grok-style depth and feedback. */
-body {
-    background:
-        radial-gradient(ellipse 900px 500px at 18% 0%, rgba(204,120,92,.075), transparent 72%),
-        radial-gradient(ellipse 760px 620px at 100% 45%, rgba(236,231,218,.36), transparent 76%),
-        var(--claude-bg);
-    min-height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-    color: var(--claude-text);
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-.main-container {
-    position: relative;
-    overflow: hidden;
-    max-width: 800px;
-    padding: 3rem;
-    margin: 2rem 0;
-    border: 1px solid var(--claude-border);
-    border-radius: 24px;
-    background: linear-gradient(180deg, #fff 0%, #fff 80%, #fdfbf7 100%);
-    box-shadow: inset 0 1px 0 #fff, 0 6px 18px rgba(43,33,24,.035), 0 26px 64px rgba(43,33,24,.075);
-    animation: claudeSurfaceEnter .6s cubic-bezier(.22,1,.36,1) backwards;
-}
-.main-container::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 12%; right: 12%; height: 2px;
-    background: linear-gradient(90deg, transparent, #f5e2d7 26%, #d9aa93 50%, #f5e2d7 74%, transparent);
-    pointer-events: none;
-}
-.step-card {
-    position: relative;
-    overflow: hidden;
-    margin-bottom: 1.5rem;
-    border: 1px solid var(--claude-border);
-    border-radius: 18px;
-    background: var(--claude-card-bg);
-    box-shadow: inset 0 1px 0 #fff, 0 2px 4px rgba(43,33,24,.025), 0 8px 18px rgba(43,33,24,.025);
-    transition: border-color .25s ease, box-shadow .3s ease;
-}
-.step-card.active {
-    border-color: rgba(204,120,92,.5);
-    box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(204,120,92,.07), 0 10px 26px rgba(43,33,24,.06);
-    animation: claudeContentEnter .35s cubic-bezier(.22,1,.36,1) backwards;
-}
-.step-card.completed { border-color: var(--claude-success); background: #FAFFF8; }
-.card-header { padding: 1.5rem 1.75rem; border: none; background: transparent; color: var(--claude-text); font-weight: 600; }
-.card-header h5 { line-height: 1.5; font-weight: 600; letter-spacing: -.025em; }
-.card-body { padding: 0 1.75rem 1.75rem; }
-.hero-card {
-    border-color: #e9dbcd !important;
-    border-radius: 21px;
-    background:
-        radial-gradient(ellipse at 45% -15%, rgba(255,255,255,.95), transparent 68%),
-        var(--brand-gradient-soft) !important;
-    box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(204,120,92,.06), 0 6px 18px rgba(43,33,24,.035);
-}
-.hero-card::after {
-    content: '';
-    position: absolute;
-    width: 150px; height: 150px; top: -65px; right: -65px;
-    border: 1px solid rgba(204,120,92,.09);
-    border-radius: 50%;
-    box-shadow: 0 0 0 24px rgba(204,120,92,.025), 0 0 0 49px rgba(204,120,92,.015);
-    pointer-events: none;
-}
-.brand-badge {
-    display: flex; align-items: center; gap: .45rem;
-    width: max-content; max-width: 100%; margin-left: auto; margin-right: auto;
-    padding: .3rem .85rem;
-    border: 1px solid #e9dccd;
-    border-radius: 999px;
-    background: rgba(255,255,255,.65);
-    box-shadow: inset 0 1px 0 #fff, 0 2px 3px rgba(43,33,24,.025);
-    font-size: .6875rem; font-weight: 700; letter-spacing: .12em;
-}
-.brand-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude-primary); box-shadow: 0 0 0 3px rgba(204,120,92,.09); }
-.claude-logo { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .625rem; font-size: 1.65rem; font-weight: 750; line-height: 1.3; letter-spacing: -.035em; color: var(--claude-text); }
-.claude-logo-icon {
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-    width: 38px; height: 38px; border-radius: 11px;
-    background: linear-gradient(145deg, #E89B7F, #CC785C 52%, #B56B51);
-    border: 1px solid #B96D53; border-top-color: #EDB29B;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.34), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 8px 13px rgba(168,93,71,.16);
-    font-size: 1.2rem; font-weight: 800; color: #fff;
-    transition: transform .3s cubic-bezier(.22,1,.36,1), box-shadow .3s ease;
-}
-.price-tag {
-    display: inline-flex; align-items: baseline;
-    margin-top: 1rem; padding: .4rem 1rem;
-    background: linear-gradient(180deg, #fff, #fcf8f2);
-    border: 1px solid #e8ddcd; border-radius: 12px;
-    box-shadow: inset 0 1px 0 #fff, 0 2px 0 #e9dfd1, 0 5px 10px rgba(43,33,24,.035);
-}
-.price-currency { margin-right: .1em; color: var(--claude-text-light); font-size: .85rem; font-weight: 700; }
-.price-amount { font-size: 1.65rem; font-weight: 800; letter-spacing: -.035em; }
-.price-period { margin-left: .25em; color: var(--claude-text-light); font-size: .8rem; font-weight: 500; }
-.price-tag-meta { margin-left: .75em; padding-left: .75em; border-left: 1px solid var(--claude-border); color: var(--claude-text-light); font-size: .7rem; font-weight: 500; text-transform: uppercase; }
-.trust-features > div > div {
-    height: 100%;
-    background: linear-gradient(150deg, #fdfbf6, var(--claude-surface)) !important;
-    border-color: #e7ddce !important; border-radius: 12px !important;
-    box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(204,120,92,.05), 0 3px 0 rgba(220,205,185,.38), 0 6px 12px rgba(43,33,24,.025);
-    transition: transform .28s cubic-bezier(.22,1,.36,1), box-shadow .28s ease, border-color .25s ease;
-    animation: claudeFeatureEnter .55s cubic-bezier(.22,1,.36,1) backwards;
-}
-.trust-features > div:nth-child(1) > div { animation-delay: .08s; }
-.trust-features > div:nth-child(2) > div { animation-delay: .15s; }
-.trust-features > div:nth-child(3) > div { animation-delay: .22s; }
-.trust-features .bi { color: var(--claude-primary-dark); filter: drop-shadow(0 1px 0 #fff); }
-.steps-container { position: relative; padding: 1.25rem 0; margin-bottom: 2rem; background: transparent; }
-.step-indicator { position: relative; }
-.step-indicator::before { content: ''; position: absolute; top: 18px; left: 50%; width: 100%; height: 2px; background: linear-gradient(90deg, rgba(204,120,92,.2), var(--claude-border)); z-index: 1; }
-.step-indicator:last-child::before { display: none; }
-.step-number {
-    display: flex; align-items: center; justify-content: center;
-    position: relative; z-index: 2;
-    width: 36px; height: 36px; margin: 0 auto .5rem;
-    border: 2px solid var(--claude-border); border-radius: 50%;
-    background: linear-gradient(155deg, #fff, var(--claude-surface));
-    color: var(--claude-text-light); font-weight: 600; font-size: .875rem;
-    box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(220,205,185,.22);
-    transition: transform .3s cubic-bezier(.22,1,.36,1), background .25s ease, box-shadow .25s ease, border-color .25s ease;
-}
-.step-number.active {
-    background: var(--brand-gradient); color: #fff; border-color: var(--claude-primary);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 0 var(--claude-primary-dark), 0 6px 12px rgba(204,120,92,.2);
-    transform: scale(1.06);
-}
-.step-number.active::after { content: ''; position: absolute; inset: -6px; border: 1px solid rgba(204,120,92,.18); border-radius: 50%; pointer-events: none; }
-.step-number.completed { background: var(--claude-success); border-color: var(--claude-success); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 0 rgba(16,125,96,.28), 0 5px 10px rgba(16,163,127,.12); }
-.step-label { font-weight: 500; color: var(--claude-text-light); font-size: .75rem; }
-.step-label.active { color: var(--claude-text); font-weight: 600; }
-.form-label { margin-bottom: .5rem; color: var(--claude-text); font-size: .9375rem; font-weight: 500; }
-.form-control {
-    border: 1.5px solid #e2d9c9; border-radius: 12px;
-    padding: .875rem 1rem;
-    background: linear-gradient(180deg, #f5f1e9, #fbf8f2);
-    box-shadow: inset 0 2px 4px rgba(43,33,24,.04), 0 1px 0 #fff;
-    color: var(--claude-text); font-size: 1rem;
-    transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
-}
-.form-control:focus { outline: none; background: #fffefa; border-color: var(--claude-primary); color: var(--claude-text); box-shadow: inset 0 1px 2px rgba(43,33,24,.02), 0 0 0 3px rgba(204,120,92,.10); }
-.form-control::placeholder { color: var(--claude-text-light); opacity: .9; }
-.form-control-lg { padding: 1rem 1.25rem; font-size: 1.125rem; }
-/* Warm satin face, highlighted edge, solid base, and soft contact shadow. */
-.btn {
-    position: relative; isolation: isolate; overflow: hidden;
-    min-height: 48px; padding: .875rem 1.75rem; border: 1px solid transparent; border-radius: 13px;
-    font-size: 1rem; font-weight: 600;
-    user-select: none; -webkit-tap-highlight-color: transparent;
-    transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .22s ease, filter .2s ease, background .2s ease;
-}
-.btn-lg { padding: 1.125rem 2rem; font-size: 1.0625rem; }
-.btn-sm { min-height: 40px; padding: .6rem 1.25rem; }
-.btn-label { position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
-.btn-primary {
-    background:
-        linear-gradient(180deg, rgba(255,255,255,.10), transparent 55%),
-        radial-gradient(ellipse 65% 160% at var(--mx,50%) 0%, rgba(255,255,255,.13), transparent 85%),
-        linear-gradient(135deg, #D98B70 0%, #CC785C 48%, #B96B52 100%);
-    border-color: #B2674E; border-top-color: #EBAB90;
-    color: #fff; letter-spacing: .01em; text-shadow: 0 1px 1px rgba(117,58,38,.28);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.30), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 8px 15px rgba(168,93,71,.19), 0 17px 26px rgba(168,93,71,.065);
-}
-.btn-primary::after {
-    content: ''; position: absolute; top: 0; left: -135%; width: 70%; height: 100%; z-index: 1;
-    background: linear-gradient(115deg, transparent 12%, rgba(255,255,255,.09) 45%, rgba(255,255,255,.22) 50%, transparent 86%);
-    transform: skewX(-22deg); pointer-events: none;
-    transition: left .7s cubic-bezier(.22,1,.36,1);
-}
-.btn-primary:hover, .btn-primary:focus, .btn-primary:active, .btn-primary.active { border-color: #B2674E; border-top-color: #EBAB90; background-color: var(--claude-primary); color: #fff; }
-.btn-primary:focus { box-shadow: inset 0 1px 0 rgba(255,255,255,.30), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 8px 15px rgba(168,93,71,.19), 0 17px 26px rgba(168,93,71,.065); }
-.btn-primary:focus-visible { outline: 2px solid var(--claude-primary); outline-offset: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.34), 0 3px 0 #A85D47, 0 8px 16px rgba(168,93,71,.2); }
-.btn-primary:active:not(:disabled):not(.is-loading) { transform: translateY(2px) scale(.992); filter: brightness(.98); box-shadow: inset 0 2px 4px rgba(117,58,38,.19), inset 0 1px 0 rgba(255,255,255,.19), 0 1px 0 #A85D47, 0 3px 7px rgba(168,93,71,.15); }
-.btn-primary:disabled, .btn-primary.disabled { background: linear-gradient(135deg, #D28D74, #C47A60 50%, #B76D54); border-color: #B2674E; border-top-color: #EBAB90; color: #fff; opacity: .8; cursor: not-allowed; box-shadow: inset 0 1px 0 rgba(255,255,255,.24), 0 2px 0 #AC6B53, 0 5px 10px rgba(168,93,71,.12); }
-.btn-success { background: var(--claude-success); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 0 rgba(16,125,96,.3), 0 5px 12px rgba(16,163,127,.13); }
-.btn-outline-secondary { border-color: #e1d7c7; background: linear-gradient(180deg, #fff, var(--claude-surface)); color: var(--claude-text); box-shadow: inset 0 1px 0 #fff, 0 2px 0 #e7ddce, 0 4px 7px rgba(43,33,24,.035); }
-.btn-outline-secondary:hover, .btn-outline-secondary:focus, .btn-outline-secondary:active { border-color: #d8c8b4; background-color: var(--claude-surface); color: var(--claude-text); box-shadow: inset 0 1px 0 #fff, 0 2px 0 #e7ddce, 0 4px 7px rgba(43,33,24,.035); }
-.btn-outline-secondary:focus-visible { outline: 2px solid var(--claude-primary); outline-offset: 3px; }
-.btn-outline-secondary:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(43,33,24,.07), 0 1px 0 #e7ddce; }
-.btn-cta-pulse { animation: none; }
-.btn.is-loading, .btn:disabled, .btn.disabled { transform: none !important; filter: none; animation: none; }
-.btn.is-loading { pointer-events: none; cursor: wait; opacity: 1; }
-.btn.is-loading .btn-label { opacity: 1; }
-.btn.is-loading .btn-label::before { content: ''; width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: claudeSpin .7s linear infinite; }
-.btn.is-loading::after, .btn:disabled::after, .btn.disabled::after { display: none; }
-.ripple { position: absolute; z-index: 1; border-radius: 50%; background: rgba(255,255,255,.32); transform: scale(0); animation: claudeRipple .6s linear; pointer-events: none; }
-.alert { padding: 1rem 1.25rem; border: 1px solid; border-radius: 12px; font-size: .9375rem; box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 3px 10px rgba(43,33,24,.025); animation: claudeContentEnter .28s cubic-bezier(.22,1,.36,1) backwards; overflow-wrap: anywhere; }
-.alert-sm { font-size: .875rem; }
-.alert-success { background: #F0FDF4; border-color: #BBF7D0; color: #166534; }
-.alert-secondary { background: linear-gradient(135deg, #f7f3ea, #fcf9f3); border-color: #e9d9ca; color: var(--claude-text); }
-.alert-danger { border-color: #f1c9c4; }
-.progress { height: 8px; border-radius: 12px; background: var(--claude-border); }
-.progress-bar { border-radius: 12px; background: var(--claude-primary); transition: width .3s ease; }
-.status-card { padding: 2rem; margin-top: 2rem; border: 1px solid var(--claude-border); border-radius: 16px; background: var(--claude-card-bg); box-shadow: inset 0 1px 0 #fff, 0 6px 18px rgba(43,33,24,.04); }
-.recharge-confirmation { margin-bottom: 1.4rem; padding: 1.25rem; border: 1px solid #e8ddce; border-radius: 14px; background: linear-gradient(145deg, #fdfbf7, var(--claude-surface)); box-shadow: inset 0 1px 0 #fff, 0 2px 5px rgba(43,33,24,.025); }
-.confirmation-heading { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; color: var(--claude-text); font-size: .9375rem; font-weight: 600; }
-.confirmation-heading .bi { color: var(--claude-primary-dark); }
-.confirmation-details { margin: 0; }
-.confirmation-row { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: .75rem; padding: .75rem 0; border-top: 1px solid rgba(204,120,92,.12); font-size: .875rem; }
-.confirmation-row dt { color: var(--claude-text-light); font-weight: 500; }
-.confirmation-row dd { min-width: 0; margin: 0; color: var(--claude-text); font-weight: 600; overflow-wrap: anywhere; }
-.confirmation-code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-variant-ligatures: none; word-break: break-all; user-select: text; }
-.confirmation-hint { margin: .9rem 0 0; color: var(--claude-text-light); font-size: .8125rem; line-height: 1.7; }
-.confirmation-edit { margin-top: .85rem; font-size: .875rem; }
-#queryToggleIcon { display: inline-block; }
-[onclick="toggleQuerySection()"] { border-radius: 17px; transition: background .2s ease; }
-#querySection, #queryResultsContainer { animation: claudeContentEnter .25s cubic-bezier(.22,1,.36,1) backwards; }
-.site-nav-bar { position: fixed; top: .85rem; left: .85rem; z-index: 1000; display: flex; align-items: center; gap: .5rem; max-width: calc(100vw - 1.7rem); }
-.site-nav-trigger { display: inline-flex; align-items: center; gap: .5rem; list-style: none; padding: .45rem .85rem .45rem .5rem; border: 1px solid #e6ddce; border-radius: 999px; background: linear-gradient(180deg, #fff, #fcf8f1); color: var(--claude-text); font-weight: 600; font-size: .8125rem; line-height: 1; box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(224,211,191,.4), 0 5px 12px rgba(43,33,24,.045); }
-.site-nav-trigger-dot { width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; background: var(--brand-gradient); box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 1px 2px rgba(168,93,71,.18); }
-.lang-selector { position: fixed; top: 1rem; right: 1rem; z-index: 1000; }
-.lang-selector .dropdown-toggle { padding: .5rem .75rem; border: 1px solid #e6ddce; border-radius: 10px; background: linear-gradient(180deg, #fff, #fcf8f1); color: var(--claude-text); font-size: .875rem; box-shadow: inset 0 1px 0 #fff, 0 2px 0 rgba(224,211,191,.4), 0 5px 12px rgba(43,33,24,.045); cursor: pointer; transition: transform .2s ease, box-shadow .2s ease; }
-.lang-selector .dropdown-toggle:focus-visible { outline: 2px solid var(--claude-primary); outline-offset: 3px; }
-.lang-selector .dropdown-menu { min-width: 120px; padding: .35rem; border: 1px solid var(--claude-border); border-radius: 12px; background: #fffefa; box-shadow: inset 0 1px 0 #fff, 0 10px 25px rgba(43,33,24,.1); }
-.lang-selector .dropdown-item { padding: .5rem .75rem; border-radius: 8px; font-size: .875rem; color: var(--claude-text); }
-.lang-selector .dropdown-item:hover, .lang-selector .dropdown-item:focus { background: var(--claude-surface); color: var(--claude-primary-dark); }
-.dropdown-menu.show { animation: claudeContentEnter .18s ease-out; }
-.footer { padding: 2rem 0; text-align: center; color: var(--claude-text-light); font-size: .875rem; }
-@media (hover: hover) and (pointer: fine) {
-    .btn-primary:hover:not(:disabled):not(.disabled):not(.is-loading) { transform: translateY(-2px); filter: brightness(1.045); box-shadow: inset 0 1px 0 rgba(255,255,255,.36), inset 0 -2px 0 rgba(117,58,38,.2), 0 4px 0 #A85D47, 0 14px 23px rgba(168,93,71,.22), 0 22px 32px rgba(168,93,71,.07); }
-    .btn-primary:hover:not(:disabled):not(.is-loading)::after { left: 150%; }
-    .btn-primary:hover:active:not(:disabled):not(.disabled):not(.is-loading) { transform: translateY(2px) scale(.992); box-shadow: inset 0 2px 4px rgba(117,58,38,.19), inset 0 1px 0 rgba(255,255,255,.19), 0 1px 0 #A85D47, 0 3px 7px rgba(168,93,71,.15); }
-    .btn-outline-secondary:hover:not(:disabled) { transform: translateY(-2px); background: linear-gradient(180deg, #fff, #faf6ee); color: var(--claude-text); box-shadow: inset 0 1px 0 #fff, 0 3px 0 #e7ddce, 0 8px 12px rgba(43,33,24,.06); }
-    .trust-features > div > div:hover { transform: translateY(-3px); border-color: #dcbda6 !important; box-shadow: inset 0 1px 0 #fff, 0 4px 0 rgba(220,205,185,.4), 0 12px 18px rgba(43,33,24,.055); }
-    .claude-logo:hover .claude-logo-icon { transform: translateY(-2px) rotate(-4deg); }
-    .form-control:hover:not(:focus) { border-color: #d2b49e; }
-    [onclick="toggleQuerySection()"]:hover { background: #fcf8f1; }
-    .lang-selector .dropdown-toggle:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 #fff, 0 3px 0 rgba(224,211,191,.4), 0 7px 14px rgba(43,33,24,.06); }
-}
-@keyframes claudeSurfaceEnter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes claudeFeatureEnter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes claudeContentEnter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes claudeSpin { to { transform: rotate(360deg); } }
-@keyframes claudeRipple { to { transform: scale(4); opacity: 0; } }
-@media (max-width: 768px) {
-    .main-container { margin: 1rem .75rem; padding: 1.5rem 1.25rem; border-radius: 20px; }
-    .btn { width: 100%; min-height: 50px; padding: .875rem 1rem; }
-    #queryCardsBtn { width: auto; min-height: 42px; padding: .6rem 1.25rem; }
-}
-@media (max-width: 575px) {
-    .main-container { margin: 2rem 0 .75rem; padding: 1.35rem 1rem; box-shadow: inset 0 1px 0 #fff, 0 8px 26px rgba(43,33,24,.065); }
-    .hero-card { border-radius: 17px; }
-    .claude-logo { font-size: clamp(1.3rem, 5vw, 1.65rem); }
-    .steps-container { margin-bottom: 1.5rem; }
-    .card-header { padding: 1.25rem 1.1rem; }
-    .card-header h5 { font-size: 1.0625rem; }
-    .card-body { padding: 0 1.1rem 1.25rem; }
-    .form-control-lg { padding: .875rem 1rem; font-size: 1rem; }
-    .btn-primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.3), inset 0 -2px 0 rgba(117,58,38,.18), 0 3px 0 #A85D47, 0 7px 13px rgba(168,93,71,.16); }
-    .btn-label { max-width: 100%; }
-    .recharge-confirmation { padding: 1rem; }
-    .confirmation-row { grid-template-columns: 1fr; gap: .3rem; }
-}
-@media (max-width: 359px) {
-    .trust-features > div > div { padding-left: .25rem !important; padding-right: .25rem !important; }
-}
-@media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-}
-
-/* Delivery status: persistent DOM, real milestones, no simulated percentage. */
-.delivery-card { --delivery-color: #CC785C; position: relative; isolation: isolate; padding: 1.4rem; margin: .15rem 0 1.3rem; border: 1px solid #eadbd0; border-radius: 19px; background: radial-gradient(ellipse at 50% 0, #fff8ef 0, transparent 70%), #fffdfa; box-shadow: inset 0 1px 0 #fff, 0 9px 26px rgba(83,53,33,.045); overflow: hidden; animation: claudeContentEnter .3s ease-out; }
-.delivery-card[data-state="success"] { --delivery-color: #24856a; border-color: #cde4d8; background: radial-gradient(ellipse at 50% 0, #eff9f2, transparent 70%), #fdfffc; }
-.delivery-card[data-state="error"] { --delivery-color: #b75545; border-color: #edd1c9; }
-.delivery-card[data-state="pending"] { --delivery-color: #a67a36; border-color: #e8ddc4; }
-.delivery-topline { display: flex; align-items: center; justify-content: space-between; gap: .5rem; color: var(--claude-text-light); font-size: .6875rem; letter-spacing: .035em; }
-.delivery-status-label { display: inline-flex; align-items: center; gap: .4rem; }
-.delivery-status-label::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--delivery-color); box-shadow: 0 0 0 3px rgba(204,120,92,.08); }
-.delivery-elapsed { font-variant-numeric: tabular-nums; letter-spacing: 0; }
-.delivery-art { position: relative; display: grid; place-items: center; width: 100px; height: 100px; margin: 1rem auto .85rem; }
-.delivery-art::before { content: ''; position: absolute; inset: 0; border: 1px solid rgba(204,120,92,.10); border-radius: 50%; background: radial-gradient(circle, rgba(204,120,92,.06), transparent 72%); }
-.delivery-orbit { position: absolute; inset: 0; border: 1px solid transparent; border-top-color: rgba(204,120,92,.55); border-left-color: rgba(204,120,92,.1); border-radius: 50%; animation: deliveryOrbit 4s linear infinite; }
-.delivery-orbit::after { content: ''; position: absolute; top: 11px; right: 11px; width: 5px; height: 5px; background: #d49a7d; border-radius: 50%; box-shadow: 0 0 9px rgba(204,120,92,.25); }
-.delivery-core { display: grid; place-items: center; width: 68px; height: 68px; border: 1px solid #f3d8c4; border-radius: 23px; color: var(--delivery-color); background: linear-gradient(145deg, #fff, #f8ebdf); box-shadow: inset 0 1px 0 #fff, 0 5px 0 rgba(222,195,170,.25), 0 10px 20px rgba(117,75,47,.09); animation: deliveryBreathe 2.8s ease-in-out infinite; }
-.delivery-core svg { width: 37px; height: 37px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-.delivery-core .delivery-check, .delivery-core .delivery-pause, .delivery-core .delivery-cross { display: none; }
-.delivery-title { margin: 0; color: var(--claude-text); text-align: center; font-size: 1.125rem; font-weight: 650; letter-spacing: -.025em; line-height: 1.6; }
-.delivery-description { max-width: 27rem; min-height: 2.8em; margin: .35rem auto 1.2rem; color: var(--claude-text-light); text-align: center; font-size: .8125rem; line-height: 1.7; overflow-wrap: anywhere; }
-.delivery-rail { position: relative; height: 3px; margin: 0 .25rem 1rem; border-radius: 5px; background: #eee5d9; overflow: hidden; }
-.delivery-rail::after { content: ''; position: absolute; inset: 0; width: 42%; border-radius: inherit; background: linear-gradient(90deg, transparent, var(--delivery-color), transparent); animation: deliverySweep 1.9s ease-in-out infinite; }
-.delivery-milestones { display: flex; justify-content: space-between; gap: .25rem; padding: 0; margin: 0; list-style: none; }
-.delivery-milestones li { display: flex; align-items: center; gap: .35rem; color: #a69784; font-size: .6875rem; white-space: nowrap; }
-.delivery-milestones i { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid #e8dfd2; font-style: normal; font-size: .625rem; line-height: 1; }
-.delivery-milestones .is-current { color: var(--delivery-color); font-weight: 600; }
-.delivery-milestones .is-current i { border-color: currentColor; background: #fff6ec; box-shadow: 0 0 0 3px rgba(204,120,92,.06); }
-.delivery-milestones .is-done { color: var(--delivery-color); }
-.delivery-milestones .is-done i { background: var(--delivery-color); border-color: var(--delivery-color); color: #fff; }
-.delivery-meta { display: grid; gap: .5rem; margin: 1.2rem 0 0; padding-top: .95rem; border-top: 1px solid rgba(139,115,85,.12); font-size: .75rem; }
-.delivery-meta > div { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); gap: .75rem; }
-.delivery-meta dt { margin: 0; color: var(--claude-text-light); font-weight: 400; }
-.delivery-meta dd { margin: 0; color: var(--claude-text); overflow-wrap: anywhere; }
-.delivery-note { margin: .85rem 0 0; font-size: .6875rem; color: var(--claude-text-light); text-align: center; line-height: 1.7; }
-.delivery-card:not([data-state="working"]) .delivery-orbit { display: none; }
-.delivery-card:not([data-state="working"]) .delivery-core { animation: none; }
-.delivery-card:not([data-state="working"]) .delivery-spark { display: none; }
-.delivery-card[data-state="success"] .delivery-core { border-color: #d8eadd; background: linear-gradient(145deg, #fff, #e7f5eb); box-shadow: inset 0 1px 0 #fff, 0 5px 0 rgba(178,208,187,.22), 0 10px 20px rgba(44,100,74,.07); }
-.delivery-card[data-state="success"] .delivery-check { display: block; stroke-dasharray: 45; stroke-dashoffset: 45; animation: deliveryDraw .45s ease-out forwards; }
-.delivery-card[data-state="pending"] .delivery-pause, .delivery-card[data-state="error"] .delivery-cross { display: block; }
-.delivery-card:not([data-state="working"]) .delivery-rail::after { animation: none; width: 100%; background: var(--delivery-color); opacity: .5; }
-.delivery-card[data-state="pending"] .delivery-rail::after, .delivery-card[data-state="error"] .delivery-rail::after { width: 0; }
-#step3[data-delivery="working"] .recharge-confirmation, #step3[data-delivery="success"] .recharge-confirmation, #step3[data-delivery="pending"] .recharge-confirmation { display: none; }
-#step3[data-delivery="working"] #startRechargeBtn .btn-label::before { display: none; }
-@keyframes deliveryOrbit { to { transform: rotate(360deg); } }
-@keyframes deliveryBreathe { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@keyframes deliverySweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(350%); } }
-@keyframes deliveryDraw { to { stroke-dashoffset: 0; } }
-@media (max-width: 575px) { .delivery-card { padding: 1.1rem; } .delivery-milestones { gap: .1rem; } .delivery-milestones li { gap: .25rem; font-size: .625rem; } .delivery-title { font-size: 1.0625rem; } }
-@media (prefers-reduced-motion: reduce) { .delivery-card *, .delivery-card *::after { animation: none !important; } .delivery-card[data-state="success"] .delivery-check { stroke-dashoffset: 0; } .delivery-rail::after { transform: none; width: 100%; opacity: .35; } }
-
-    </style>
-</head>
-<body>
-    <div class="site-nav-bar">
-        <span class="site-nav-trigger" style="cursor: default;">
-            <span class="site-nav-trigger-dot"></span>
-            <span>Claude Pro</span>
-        </span>
-    </div>
-
-    <div class="lang-selector dropdown">
-        <button class="dropdown-toggle" type="button" id="langSelectorBtn" data-bs-toggle="dropdown">中文</button>
-        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="langSelectorBtn">
-            <li><a class="dropdown-item" href="javascript:void(0)" onclick="setLanguage('zh'); return false;">中文</a></li>
-            <li><a class="dropdown-item" href="javascript:void(0)" onclick="setLanguage('en'); return false;">English</a></li>
-            <li><a class="dropdown-item" href="javascript:void(0)" onclick="setLanguage('ja'); return false;">日本語</a></li>
-            <li><a class="dropdown-item" href="javascript:void(0)" onclick="setLanguage('ko'); return false;">한국어</a></li>
-        </ul>
-    </div>
-
-    <div class="container py-4">
-        <div class="row justify-content-center">
-            <div class="col-lg-8 col-md-10">
-                <div class="main-container">
-                    <div class="card step-card mb-3 hero-card" style="border: 1px solid var(--claude-border); background: var(--brand-gradient-soft);">
-                        <div class="card-body" style="padding: 1.5rem 1.25rem;">
-                            <div class="text-center mb-3">
-                                <div class="brand-badge">
-                                    <span class="brand-badge-dot"></span>
-                                    <span>CLAUDE · PRO</span>
-                                </div>
-                                <div class="claude-logo" style="justify-content: center; margin-top: 0.75rem;">
-                                    <div class="claude-logo-icon">C</div>
-                                    <span>Claude Pro</span>
-                                </div>
-                                <p style="color: var(--claude-text-light); font-size: 0.875rem; margin: 0.5rem 0 0;" data-i18n="heroSubtitle">官方订阅 · 一键充值 · 即时到账</p>
-                                <div class="price-tag" aria-label="月度价格">
-                                    <span class="price-currency">$</span><span class="price-amount">20</span><span class="price-period">/月</span>
-                                    <span class="price-tag-meta">Standard</span>
-                                </div>
-                            </div>
-                            <div class="row g-2 mb-3 trust-features">
-                                <div class="col-4">
-                                    <div class="text-center" style="padding: 0.75rem 0.5rem; background: var(--claude-surface); border-radius: 8px; border: 1px solid var(--claude-border);">
-                                        <div style="font-size: 1.5rem; margin-bottom: 0.5rem;"><i class="bi bi-shield-check"></i></div>
-                                        <div style="font-weight: 600; color: var(--claude-text); font-size: 0.8125rem;" data-i18n="officialChannel">官方渠道</div>
-                                    </div>
-                                </div>
-                                <div class="col-4">
-                                    <div class="text-center" style="padding: 0.75rem 0.5rem; background: var(--claude-surface); border-radius: 8px; border: 1px solid var(--claude-border);">
-                                        <div style="font-size: 1.5rem; margin-bottom: 0.5rem;"><i class="bi bi-lightning-charge"></i></div>
-                                        <div style="font-weight: 600; color: var(--claude-text); font-size: 0.8125rem;" data-i18n="instantArrival">即时到账</div>
-                                    </div>
-                                </div>
-                                <div class="col-4">
-                                    <div class="text-center" style="padding: 0.75rem 0.5rem; background: var(--claude-surface); border-radius: 8px; border: 1px solid var(--claude-border);">
-                                        <div style="font-size: 1.5rem; margin-bottom: 0.5rem;"><i class="bi bi-gem"></i></div>
-                                        <div style="font-weight: 600; color: var(--claude-text); font-size: 0.8125rem;" data-i18n="proService">专业服务</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--claude-border);">
-                                <div style="margin-bottom: 0.75rem;">
-                                    <div style="font-weight: 600; color: var(--claude-text); margin-bottom: 0.25rem; font-size: 0.8125rem;" data-i18n="faqHowTitle">如何充值？</div>
-                                    <div style="font-size: 0.75rem; color: var(--claude-text-light);" data-i18n="faqHowDesc">无需上号，只需 Claude 账号 ID 即可充值，官方正规渠道</div>
-                                </div>
-                                <div style="margin-bottom: 0.75rem;">
-                                    <div style="font-weight: 600; color: var(--claude-text); margin-bottom: 0.25rem; font-size: 0.8125rem;" data-i18n="faqAccountTitle">如何获取 Claude 账号信息？</div>
-                                    <div style="font-size: 0.75rem; color: var(--claude-text-light);">
-                                        <span data-i18n="faqAccountDesc1">访问</span> <a href="https://claude.ai/settings" target="_blank" style="color: var(--claude-primary); text-decoration: underline;" data-i18n="faqAccountLink">claude.ai 设置页面</a><span data-i18n="faqAccountDesc2">，找到您的账户信息</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="steps-container">
-                        <div class="row">
-                            <div class="col-4 text-center step-indicator"><div class="step-number active" id="step1-indicator">1</div><div class="step-label" data-i18n="step1Label">激活卡密</div></div>
-                            <div class="col-4 text-center step-indicator"><div class="step-number" id="step2-indicator">2</div><div class="step-label" data-i18n="step2Label">绑定账号</div></div>
-                            <div class="col-4 text-center step-indicator"><div class="step-number" id="step3-indicator">3</div><div class="step-label" data-i18n="step3Label">开始充值</div></div>
-                        </div>
-                    </div>
-
-                    <div class="card step-card active" id="step1">
-                        <div class="card-header"><h5 class="mb-0" data-i18n="step1Title">步骤 1 · 验证您的充值码</h5></div>
-                        <div class="card-body">
-                            <form id="activateForm">
-                                <div class="mb-4">
-                                    <label for="cardCode" class="form-label" data-i18n="cardCodeLabel">充值码</label>
-                                    <input type="text" class="form-control form-control-lg" id="cardCode" placeholder="粘贴您购买的充值码" maxlength="64" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required style="font-family: 'Courier New', monospace; letter-spacing: 1px;">
-                                    <div class="form-text mt-2" data-i18n="cardCodeHint">购买后会立即收到充值码</div>
-                                </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100" data-loading-text="正在验证充值码"><span class="btn-label" data-i18n="verifyAndContinue">验证并继续</span></button>
-                            </form>
-                            <div id="step1-result" class="mt-3"></div>
-                        </div>
-                    </div>
-
-                    <div class="card step-card" id="step2" style="display: none;">
-                        <div class="card-header"><h5 class="mb-0" data-i18n="step2Title">步骤 2 · 绑定您的 Claude 账号</h5></div>
-                        <div class="card-body">
-                            <div class="alert alert-success mb-4">
-                                <div><strong data-i18n="cardVerified">充值码已验证</strong><div style="margin-top: 0.5rem; font-size: 0.875rem;"><span id="cardInfo"></span></div></div>
-                            </div>
-                            <form id="bindForm">
-                                <div class="mb-4">
-                                    <label for="claudeUserId" class="form-label" data-i18n="claudeIdLabel">Claude 用户 ID</label>
-                                    <input type="text" class="form-control form-control-lg" id="claudeUserId" placeholder="例如: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required style="font-family: 'Courier New', monospace;">
-                                    <div class="form-text mt-2">
-                                        <span data-i18n="claudeIdHint1">在</span> <a href="https://claude.ai/settings" target="_blank" style="color: var(--claude-primary); text-decoration: underline;" data-i18n="claudeIdHintLink">claude.ai 设置页面</a> <span data-i18n="claudeIdHint2">找到</span><br>
-                                        <span style="font-size: 0.8125rem; color: var(--claude-text-light);" data-i18n="claudeIdFormat">格式：8位-4位-4位-4位-12位</span>
-                                    </div>
-                                </div>
-                                <button type="submit" class="btn btn-primary btn-lg w-100"><span class="btn-label">下一步 · 核对充值信息</span></button>
-                            </form>
-                            <div id="step2-result" class="mt-3"></div>
-                        </div>
-                    </div>
-
-                    <div class="card step-card" id="step3" style="display: none;">
-                        <div class="card-header"><h5 class="mb-0" id="step3Title">步骤 3 · 确认充值信息</h5></div>
-                        <div class="card-body">
-                            <section class="recharge-confirmation" aria-labelledby="confirmationTitle">
-                                <div class="confirmation-heading"><i class="bi bi-shield-check" aria-hidden="true"></i><span id="confirmationTitle">请核对充值信息</span></div>
-                                <dl class="confirmation-details">
-                                    <div class="confirmation-row"><dt>充值套餐</dt><dd id="confirmProduct">—</dd></div>
-                                    <div class="confirmation-row"><dt>兑换码</dt><dd class="confirmation-code" id="confirmCdk">—</dd></div>
-                                    <div class="confirmation-row"><dt>组织 ID</dt><dd class="confirmation-code" id="confirmOrgId">—</dd></div>
-                                </dl>
-                                <p class="confirmation-hint" id="confirmationHint">充值将绑定到以上组织 ID，请核对兑换码和账号信息，确认无误后再点击充值。</p>
-                            </section>
-                            <div id="step3-result" class="mt-3"></div>
-                            <button id="startRechargeBtn" type="button" class="btn btn-primary btn-lg w-100 btn-cta-pulse" data-loading-text="正在安全充值" style="font-weight: 600;">
-                                <span class="btn-label" id="startRechargeBtnText">确认无误，立即充值</span>
-                            </button>
-                            <button id="editAccountBtn" type="button" class="btn btn-outline-secondary w-100 confirmation-edit"><span class="btn-label">返回修改账号</span></button>
-                        </div>
-                    </div>
-
-                    <!-- ===== 查询卡密状态（折叠区，移植自 Grok 页） ===== -->
-                    <div class="card step-card" style="border: 1px solid var(--claude-border);">
-                        <div class="card-body" style="padding: 0;">
-                            <div style="padding: 0.75rem 1rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between;" onclick="toggleQuerySection()">
-                                <span style="color: var(--claude-text-light); font-size: 0.875rem;" data-i18n="queryCardStatus">查询卡密状态</span>
-                                <span id="queryToggleIcon" style="color: var(--claude-text-light); font-size: 0.75rem;">▼</span>
-                            </div>
-                            <div id="querySection" style="display: none; padding: 0 1rem 1rem 1rem; border-top: 1px solid var(--claude-border);">
-                                <div class="mb-2" style="margin-top: 1rem;">
-                                    <textarea id="queryCodesInput" class="form-control" rows="3" placeholder="输入卡密，一行一个..." style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem;"></textarea>
-                                </div>
-                                <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                    <button id="queryCardsBtn" class="btn btn-sm btn-primary" data-loading-text="正在查询" onclick="queryCards()" style="font-size: 0.8125rem;"><span class="btn-label">查询</span></button>
-                                </div>
-                                <div id="queryResultsContainer" style="display: none; margin-top: 0.75rem;">
-                                    <textarea id="queryResultsOutput" class="form-control" rows="4" readonly style="font-family: monospace; font-size: 0.8125rem; border-radius: 0.5rem; background: var(--claude-surface);"></textarea>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="footer">
-        <p class="mb-1" style="font-weight: 500;" data-i18n="footerTitle">Claude Pro 充值服务</p>
-        <p class="mb-2" style="font-size: 0.8125rem;" data-i18n="footerSubtitle">官方渠道 · 安全可靠 · 即时到账</p>
-        <p class="mb-0" style="font-size: 0.75rem; color: var(--claude-text-light);">&copy; 2026 智链科技 (Zhilian Tech) All rights reserved.</p>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/public/js/lang.js?v=20260524006"></script>
-    <script>
-        // ===================================================================
-        //  TangLang / vip666 / IPiap：仅通过 Worker 请求
-        //  前端只访问 Worker；Worker 自动识别卡密所属后台并统一返回结构。
-        // ===================================================================
-        window.API_BASE = window.API_BASE || 'https://c.zlkjai.org/api/v1';
-
-        const API = {
-            step1:      window.API_BASE + '/claude/step1',
-            step2:      window.API_BASE + '/claude/step2',
-            step3:      window.API_BASE + '/claude/step3',
-            step4:      window.API_BASE + '/claude/step4',
-            saveRecord: window.API_BASE + '/claude/save-record',
-            cardQuery:  window.API_BASE + '/claude/card-query'
-        };
-
-        const flow = {
-            cdk: '',
-            claudeUserId: '',
-            productName: '',
-            orderNo: '',
-            provider: '',
-            pollToken: '',
-            submittedAt: 0,
-            submissionUncertain: false,
-            submitted: false,
-            terminalFailed: false
-        };
-        let rechargeDone = false;
-        let rechargeRunning = false;
-        let deliveryTimer = null;
-        let deliveryStartedAt = 0;
-
-        document.addEventListener('DOMContentLoaded', function () {
-            if (typeof initLanguage === 'function') initLanguage();
-            attachRipples();
-            initActivationFlow();
+      }
+    } else {
+      const reason = businessMessage(r.json, "IPiap 卡密查询失败");
+      for (const code of ipiapCodes) {
+        results.set(code, {
+          code,
+          status: 9,
+          message: reason,
+          productName: "Claude Pro - Monthly",
+          provider: "ipiap",
+          upstreamProvider: "ipiap",
         });
+      }
+    }
+  }
 
-        /* ---------- 通用 ---------- */
-        async function apiFetch(url, options) {
-            const opts = Object.assign({}, options || {});
-            const headers = Object.assign({ 'Accept': 'application/json' }, opts.headers || {});
-            if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-            opts.headers = headers;
+  if (tangCodes.length) {
+    const r = await tanglangStatusBatch(tangCodes, env);
+    const list = r.json && Array.isArray(r.json.results)
+      ? r.json.results
+      : (r.json && Array.isArray(r.json.data) ? r.json.data : []);
 
-            // 提交订单单独使用 35 秒，长于 Worker 的上游超时，避免提前丢失受理结果。
-            const timeoutMs = Number(opts.timeoutMs || 20000);
-            delete opts.timeoutMs;
-            const controller = new AbortController();
-            const externalSignal = opts.signal;
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const onExternalAbort = () => controller.abort();
-            opts.signal = controller.signal;
-            if (externalSignal) {
-                if (externalSignal.aborted) controller.abort(externalSignal.reason);
-                else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
-            }
-
-            try {
-                const res = await fetch(url, opts);
-                let body = null;
-                let raw = '';
-                try {
-                    raw = await res.text();
-                    body = raw ? JSON.parse(raw) : null;
-                } catch (e) {
-                    body = { error: 'invalid_json', message: raw ? raw.slice(0, 200) : '接口未返回 JSON' };
-                }
-                return { ok: res.ok, status: res.status, body };
-            } catch (err) {
-                if (err && err.name === 'AbortError') {
-                    throw new Error('连接超时，暂未收到接口响应');
-                }
-                throw err;
-            } finally {
-                clearTimeout(timer);
-                if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
-            }
+    if (r.ok && r.json) {
+      for (const raw of list) {
+        const item = normalizeTanglangQueryItem(raw);
+        if (item.code) results.set(item.code, item);
+      }
+      for (const code of tangCodes) {
+        if (!results.has(code)) {
+          results.set(code, {
+            code,
+            status: 9,
+            message: "未查询到该卡密",
+            productName: "Claude Pro",
+            provider: "hongyun",
+            upstreamProvider: "tanglang",
+          });
         }
+      }
+    } else {
+      for (const code of tangCodes) {
+        results.set(code, {
+          code,
+          status: 9,
+          message: tanglangMessage(r.json, "TangLang 查询失败"),
+          productName: "Claude Pro",
+          provider: "hongyun",
+          upstreamProvider: "tanglang",
+        });
+      }
+    }
+  }
 
-        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-        const isBizSuccess = (body) => {
-            if (!body || typeof body !== 'object') return false;
-            const code = body.code;
-            const msg = String(body.msg || body.message || '').toLowerCase();
-            return code === 0 || code === 200 || code === '0' || code === '200' || msg === '成功' || msg === 'success';
-        };
-        const getErrorMessage = (r, fallback) => {
-            const b = r && r.body ? r.body : {};
-            return String(b.msg || b.message || b.error || fallback || ('HTTP ' + (r ? r.status : '')));
-        };
-        const escapeHtml = (value) => String(value == null ? '' : value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
+  if (vipCodes.length) {
+    const r = await vipQueryBatch(vipCodes, env, vipCookieHeader);
+    if (r.needVerification) {
+      return verificationRequired(r.reason || "vip666ai 查询验证已失效，请重新验证");
+    }
+    if (r.success) {
+      for (const raw of r.items) {
+        const item = normalizeVipQueryItem(raw);
+        if (item.code) results.set(item.code, item);
+      }
+    } else {
+      for (const code of vipCodes) {
+        results.set(code, {
+          code,
+          status: 9,
+          message: r.reason || "vip666ai 卡密查询失败",
+          provider: "vip666",
+        });
+      }
+    }
+  }
 
-        /* ---------- 步骤指示器 / 卡片切换 ---------- */
-        function renderRechargeConfirmation() {
-            document.getElementById('confirmProduct').textContent = flow.productName || '—';
-            document.getElementById('confirmCdk').textContent = flow.cdk || '—';
-            document.getElementById('confirmOrgId').textContent = flow.claudeUserId || '—';
-            document.getElementById('confirmationTitle').textContent = rechargeDone ? '本次充值信息' : '请核对充值信息';
-            document.getElementById('confirmationHint').textContent = rechargeDone
-                ? '充值已完成，可在下方查看本次充值结果。'
-                : '充值将绑定到以上组织 ID，请核对兑换码和账号信息，确认无误后再点击充值。';
-            const editBtn = document.getElementById('editAccountBtn');
-            editBtn.style.display = rechargeDone || (flow.submitted && !flow.terminalFailed) ? 'none' : '';
-            editBtn.disabled = rechargeRunning;
-        }
-
-        function goToStep(n) {
-            if (n === 3) renderRechargeConfirmation();
-            for (let i = 1; i <= 3; i++) {
-                const card = document.getElementById('step' + i);
-                const ind  = document.getElementById('step' + i + '-indicator');
-                const label = ind ? ind.parentElement.querySelector('.step-label') : null;
-                if (card) {
-                    card.style.display = (i === n) ? '' : 'none';
-                    card.classList.toggle('active', i === n);
-                }
-                if (ind) {
-                    ind.classList.remove('active', 'completed');
-                    if (i < n) {
-                        ind.classList.add('completed');
-                        ind.innerHTML = '<i class="bi bi-check-lg"></i>';
-                    } else if (i === n) {
-                        ind.classList.add('active');
-                        ind.textContent = i;
-                    } else {
-                        ind.textContent = i;
-                    }
-                }
-                if (label) label.classList.toggle('active', i === n);
-            }
-            const top = document.querySelector('.steps-container');
-            if (top) top.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-
-        function showMsg(elId, type, html) {
-            const el = document.getElementById(elId);
-            if (!el) return;
-            const cls = type === 'error' ? 'alert-danger' : (type === 'success' ? 'alert-success' : 'alert-secondary');
-            el.innerHTML = '<div class="alert ' + cls + ' mb-0">' + html + '</div>';
-        }
-        function clearMsg(elId) {
-            const el = document.getElementById(elId);
-            if (el) el.innerHTML = '';
-        }
-        window.setBtnLoading = function (btn, on, loadingText) {
-            if (!btn) return;
-            const label = btn.querySelector('.btn-label');
-            if (on) {
-                if (label && !btn.dataset.originalLabel) btn.dataset.originalLabel = label.textContent.trim();
-                const activeText = loadingText || btn.dataset.loadingText || '正在处理';
-                btn.dataset.activeLoadingLabel = activeText;
-                btn.classList.add('is-loading');
-                btn.disabled = true;
-                btn.setAttribute('aria-busy', 'true');
-                if (label) label.textContent = activeText;
-            } else {
-                btn.classList.remove('is-loading');
-                btn.disabled = false;
-                btn.removeAttribute('aria-busy');
-                // 如果业务代码已经把按钮改成“重新兑换”等成功文案，则保留业务文案。
-                if (label && btn.dataset.originalLabel && label.textContent.trim() === (btn.dataset.activeLoadingLabel || '')) {
-                    label.textContent = btn.dataset.originalLabel;
-                }
-                delete btn.dataset.originalLabel;
-                delete btn.dataset.activeLoadingLabel;
-            }
-        };
-
-        /* ---------- 按钮水波纹 ---------- */
-        function attachRipples() {
-            document.addEventListener('pointermove', function (e) {
-                const btn = e.target.closest && e.target.closest('.btn-primary');
-                if (!btn) return;
-                const rect = btn.getBoundingClientRect();
-                const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-                btn.style.setProperty('--mx', x + '%');
-            }, { passive: true });
-
-            document.addEventListener('click', function (e) {
-                const btn = e.target.closest('.btn');
-                if (!btn || btn.classList.contains('is-loading') || btn.disabled) return;
-                const rect = btn.getBoundingClientRect();
-                const size = Math.max(rect.width, rect.height);
-                const r = document.createElement('span');
-                r.className = 'ripple';
-                r.style.width = r.style.height = size + 'px';
-                r.style.left = (e.clientX - rect.left - size / 2) + 'px';
-                r.style.top = (e.clientY - rect.top - size / 2) + 'px';
-                btn.appendChild(r);
-                setTimeout(() => r.remove(), 600);
-            });
-        }
-
-        function formatTime(v) {
-            if (!v) return '';
-            // 新后台返回的 usedTime 可能是 "YYYY-MM-DD HH:mm:ss"，这种格式直接显示最稳妥。
-            if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?$/.test(String(v))) return String(v);
-            const d = new Date(v);
-            if (isNaN(d.getTime())) return String(v);
-            const p = (x) => String(x).padStart(2, '0');
-            return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
-                ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
-        }
-
-        const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-
-        /* ---------- 步骤 1 / 2 ---------- */
-        function initActivationFlow() {
-            const actForm = document.getElementById('activateForm');
-            const bindForm = document.getElementById('bindForm');
-            const startBtn = document.getElementById('startRechargeBtn');
-
-            document.getElementById('editAccountBtn').addEventListener('click', function () {
-                if (rechargeDone || rechargeRunning || (flow.submitted && !flow.terminalFailed)) return;
-                prepareTerminalRetry();
-                clearMsg('step2-result');
-                clearMsg('step3-result');
-                goToStep(2);
-                document.getElementById('claudeUserId').focus({ preventScroll: true });
-            });
-
-            // Worker 会根据卡密自动选择 HongYun / vip666ai。
-            if (actForm) actForm.addEventListener('submit', async function (e) {
-                e.preventDefault();
-                const btn = actForm.querySelector('button[type=submit]');
-                const cdk = (document.getElementById('cardCode').value || '').trim().replace(/\s+/g, '');
-                clearMsg('step1-result');
-                if (!cdk) {
-                    showMsg('step1-result', 'error', '请输入充值码');
-                    return;
-                }
-
-                setBtnLoading(btn, true, '正在验证充值码');
-                try {
-                    const r = await apiFetch(API.step1, {
-                        method: 'POST',
-                        body: JSON.stringify({ serialNumber: cdk })
-                    });
-                    const b = r.body || {};
-                    const d = b.data || {};
-
-                    if (!r.ok || !isBizSuccess(b)) {
-                        // 截图中的已使用返回 code=1002，并在 data 中带 productName / usedTime / email 等信息。
-                        let extra = '';
-                        if (d.productName) extra += ' · ' + escapeHtml(d.productName);
-                        if (d.usedTime) extra += ' · 使用时间：' + escapeHtml(formatTime(d.usedTime));
-                        const account = d.email || d.organizationId || d.accountId || '';
-                        if (account) extra += ' · 账号：' + escapeHtml(account);
-                        showMsg('step1-result', 'error', '验证失败：' + escapeHtml(getErrorMessage(r, '充值码不可用')) + extra);
-                        return;
-                    }
-
-                    flow.cdk = cdk;
-                    flow.productName = d.productName || d.product_name || d.planName || d.product || 'Claude Pro';
-                    flow.orderNo = '';
-                    flow.provider = d.provider || b.provider || '';
-                    flow.pollToken = '';
-                    flow.submittedAt = 0;
-                    flow.submissionUncertain = false;
-                    flow.submitted = false;
-                    flow.terminalFailed = false;
-
-                    const info = document.getElementById('cardInfo');
-                    if (info) info.textContent = '套餐：' + flow.productName;
-                    goToStep(2);
-                } catch (err) {
-                    showMsg('step1-result', 'error', '网络错误：' + escapeHtml(err.message));
-                } finally {
-                    setBtnLoading(btn, false);
-                }
-            });
-
-            // 本地先做 UUID 格式校验；HongYun 会继续预检，vip666ai 在 redeem 阶段完成校验。
-            if (bindForm) bindForm.addEventListener('submit', function (e) {
-                e.preventDefault();
-                const uid = (document.getElementById('claudeUserId').value || '').trim();
-                clearMsg('step2-result');
-                if (!UUID_RE.test(uid)) {
-                    showMsg('step2-result', 'error', 'Claude 用户 ID 格式不正确，应为 8位-4位-4位-4位-12位 的 UUID。');
-                    return;
-                }
-                flow.claudeUserId = uid;
-                goToStep(3);
-            });
-
-            if (startBtn) startBtn.addEventListener('click', function () {
-                if (rechargeRunning) return;
-                if (rechargeDone) resetFlow();
-                else if (flow.terminalFailed) {
-                    prepareTerminalRetry();
-                    clearMsg('step3-result');
-                    goToStep(2);
-                }
-                else if (flow.submitted && !flow.orderNo) openUncertainCardQuery();
-                else runRedeem();
-            });
-        }
+  return ok(codes.map(code => results.get(code) || {
+    code,
+    status: 9,
+    message: "未查询到结果",
+  }));
+}
 
 
-        /* ---------- 发货状态：只更新状态内容，不反复重建动画 ---------- */
-        function ensureDeliveryCard() {
-            const host = document.getElementById('step3-result');
-            if (document.getElementById('deliveryCard')) return;
-            host.innerHTML = `
-                <section class="delivery-card" id="deliveryCard" data-state="working" aria-labelledby="deliveryTitle" aria-busy="true">
-                    <div class="delivery-topline"><span class="delivery-status-label" id="deliveryStatusLabel">正在为您处理</span><span class="delivery-elapsed" id="deliveryElapsed" aria-hidden="true">已用时 0 秒</span></div>
-                    <div class="delivery-art" aria-hidden="true"><div class="delivery-orbit"></div><div class="delivery-core">
-                        <svg class="delivery-spark" viewBox="0 0 40 40"><path d="M20 4v9m0 14v9M4 20h9m14 0h9M9 9l7 7m8 8 7 7M9 31l7-7m8-8 7-7M14 5l3 8m6 14 3 8M5 14l8 3m14 6 8 3M5 26l8-3m14-6 8-3M14 35l3-8m6-14 3-8"/></svg>
-                        <svg class="delivery-check" viewBox="0 0 40 40"><path d="m10 21 7 7 14-16"/></svg>
-                        <svg class="delivery-pause" viewBox="0 0 40 40"><path d="M15 12v16m10-16v16"/></svg>
-                        <svg class="delivery-cross" viewBox="0 0 40 40"><path d="m12 12 16 16m0-16L12 28"/></svg>
-                    </div></div>
-                    <div role="status" aria-live="polite" aria-atomic="true"><h3 class="delivery-title" id="deliveryTitle"></h3><p class="delivery-description" id="deliveryDescription"></p></div>
-                    <div class="delivery-rail" aria-hidden="true"></div>
-                    <ol class="delivery-milestones" aria-label="发货步骤"><li><i aria-hidden="true">1</i><span>信息核验</span></li><li><i aria-hidden="true">2</i><span>发货处理</span></li><li><i aria-hidden="true">3</i><span>到账确认</span></li></ol>
-                    <dl class="delivery-meta"><div><dt>套餐</dt><dd id="deliveryProduct"></dd></div><div><dt>组织 ID</dt><dd class="confirmation-code" id="deliveryAccount"></dd></div><div id="deliveryOrderRow" hidden><dt>订单号</dt><dd class="confirmation-code" id="deliveryOrder"></dd></div></dl>
-                    <p class="delivery-note" id="deliveryNote">请保留此页面，发货结果会自动更新。</p>
-                </section>`;
-        }
 
-        function stopDeliveryClock() {
-            clearInterval(deliveryTimer);
-            deliveryTimer = null;
-        }
+/* ============================= IPiap 完整充值链路 =============================
+ * 抓包确认：
+ * POST /app/recharge/step1
+ *   body: {"serialNumber":"CPSV-..."}
+ *   成功: {"code":0,"msg":"成功","data":{"platform":"claude","productName":"Claude Pro - Monthly",...}}
+ *
+ * POST /app/recharge/cardQuery
+ *   body: {"codes":["CPSV-...","CPQF-..."]}
+ *   成功: {"code":0,"msg":"成功","data":[{"code":"...","status":0,"productName":"Claude Pro - Monthly",...}]}
+ *
+ * POST /app/recharge/step2
+ *   body: {"organizationId":"UUID"}
+ * POST /app/recharge/step3
+ *   body: {"organizationId":"UUID","serialNumber":"CPSV-..."}
+ *   返回 data.orderNo
+ * POST /app/recharge/step4
+ *   body: {"orderNo":"..."}
+ *   orderStatus: 1=处理中，2=成功，3=失败。
+ * ============================================================================== */
 
-        function startDeliveryClock() {
-            stopDeliveryClock();
-            deliveryStartedAt = flow.submittedAt || Date.now();
-            const tick = () => {
-                const el = document.getElementById('deliveryElapsed');
-                if (el) el.textContent = '已用时 ' + Math.max(0, Math.floor((Date.now() - deliveryStartedAt) / 1000)) + ' 秒';
-            };
-            tick();
-            deliveryTimer = setInterval(tick, 1000);
-        }
+function getIpiapBase(env) {
+  const v = env && typeof env.IPIAP_BASE === "string" ? env.IPIAP_BASE.trim() : "";
+  return (v || DEFAULT_IPIAP_BASE).replace(/\/+$/g, "");
+}
 
-        function updateDelivery(state, stage, title, description, note) {
-            ensureDeliveryCard();
-            document.getElementById('step3').dataset.delivery = state;
-            const card = document.getElementById('deliveryCard');
-            card.dataset.state = state;
-            card.setAttribute('aria-busy', state === 'working' ? 'true' : 'false');
-            document.getElementById('deliveryStatusLabel').textContent = ({working:'正在为您处理', success:'发货已完成', pending:'等待结果确认', error:'需要您留意'})[state];
-            document.getElementById('deliveryTitle').textContent = title;
-            document.getElementById('deliveryDescription').textContent = description;
-            document.getElementById('deliveryNote').textContent = note || (state === 'working' ? '请保留此页面，发货结果会自动更新。' : '');
-            document.getElementById('deliveryProduct').textContent = flow.productName || 'Claude Pro';
-            document.getElementById('deliveryAccount').textContent = flow.claudeUserId;
-            document.getElementById('deliveryOrder').textContent = flow.orderNo;
-            document.getElementById('deliveryOrderRow').hidden = !flow.orderNo;
-            card.querySelectorAll('.delivery-milestones li').forEach((item, i) => {
-                const done = state === 'success' || i < stage;
-                const current = state !== 'success' && i === stage;
-                item.classList.toggle('is-done', done);
-                item.classList.toggle('is-current', current);
-                item.querySelector('i').textContent = done ? '✓' : String(i + 1);
-                if (current) item.setAttribute('aria-current', 'step');
-                else item.removeAttribute('aria-current');
-            });
-            if (state !== 'working') stopDeliveryClock();
-        }
+function ipiapHeaders(env) {
+  const h = new Headers();
+  h.set("Accept", "application/json, text/plain, */*");
+  h.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+  h.set("Content-Type", "application/json");
+  h.set("Origin", "https://ipiap.com");
+  h.set("Referer", "https://ipiap.com/");
+  h.set("User-Agent", BROWSER_UA);
+  h.set("X-Language", "zh");
 
-        function openUncertainCardQuery() {
-            const section = document.getElementById('querySection');
-            section.style.display = 'block';
-            document.getElementById('queryToggleIcon').textContent = '▲';
-            document.getElementById('queryCodesInput').value = flow.cdk;
-            section.scrollIntoView({behavior:'smooth', block:'center'});
-            document.getElementById('queryCodesInput').focus({preventScroll:true});
-        }
+  // 截图中存在这些请求头。不要把浏览器里短期 cf_clearance 硬编码进源码，
+  // 如上游要求，可通过 Worker 环境变量配置。
+  const aid = env && typeof env.IPIAP_AID === "string" ? env.IPIAP_AID.trim() : "";
+  const did = env && typeof env.IPIAP_DID === "string" ? env.IPIAP_DID.trim() : "";
+  const sysToken = env && typeof env.IPIAP_SYS_TOKEN === "string" ? env.IPIAP_SYS_TOKEN.trim() : "";
+  const cookie = env && typeof env.IPIAP_COOKIE === "string" ? env.IPIAP_COOKIE.trim() : "";
 
-        function setDeliveryDescription(text) {
-            const el = document.getElementById('deliveryDescription');
-            if (el && el.textContent !== text) el.textContent = text;
-        }
+  if (aid) h.set("Aid", aid);
+  if (did) h.set("Did", did);
+  if (sysToken) h.set("Sys-Token", sysToken);
+  if (cookie) h.set("Cookie", cookie);
 
-        function prepareTerminalRetry() {
-            if (!flow.terminalFailed) return;
-            flow.submitted = false;
-            flow.orderNo = '';
-            flow.submittedAt = 0;
-            flow.submissionUncertain = false;
-            flow.terminalFailed = false;
-            delete document.getElementById('step3').dataset.delivery;
-            setRedeemButtonText('确认无误，立即充值');
-        }
+  return h;
+}
 
-        function setRedeemButtonText(text) {
-            document.getElementById('startRechargeBtnText').textContent = text;
-        }
+async function ipiapStep1(code, env) {
+  return upstreamJson(getIpiapBase(env) + "/app/recharge/step1", {
+    method: "POST",
+    headers: ipiapHeaders(env),
+    body: JSON.stringify({ serialNumber: code }),
+  });
+}
 
-        function finishDelivery() {
-            rechargeDone = true;
-            updateDelivery('success', 2, '充值成功，已为您送达', '会员充值已完成，现在可以前往 Claude 查看。', '如页面暂未更新，可刷新 Claude 后查看会员状态。');
-            setRedeemButtonText('返回首页 · 继续兑换');
-            // 展示成功不等待记录同步；回调只更新本订单的提示。
-            const completedOrder = flow.orderNo;
-            void saveUsageRecord({...flow}).then(saved => {
-                if (!saved && rechargeDone && flow.orderNo === completedOrder && document.getElementById('deliveryNote')) {
-                    document.getElementById('deliveryNote').textContent = '充值已完成，记录同步稍有延迟，不影响本次发货。';
-                }
-            });
-        }
 
-        /* ---------- 提交一次；待确认时按钮仅继续查询 ---------- */
-        async function runRedeem() {
-            if (rechargeRunning) return;
-            const btn = document.getElementById('startRechargeBtn');
-            if (!flow.cdk || !flow.claudeUserId) {
-                showMsg('step3-result', 'error', '缺少充值码或 Claude 用户 ID，请返回上一步重试。');
-                return;
-            }
-            if (flow.submitted && !flow.orderNo) { openUncertainCardQuery(); return; }
-            rechargeRunning = true;
-            setBtnLoading(btn, true, flow.orderNo ? '正在查询发货结果' : '正在为您充值');
-            btn.classList.remove('btn-cta-pulse');
-            renderRechargeConfirmation();
-            ensureDeliveryCard();
-            startDeliveryClock();
-            let stage = flow.orderNo ? 2 : 0;
+async function ipiapStep2(uid, env) {
+  const r = await upstreamJson(getIpiapBase(env) + "/app/recharge/step2", {
+    method: "POST",
+    headers: ipiapHeaders(env),
+    body: JSON.stringify({ organizationId: uid }),
+  });
 
-            try {
-                if (!flow.orderNo) {
-                    updateDelivery('working', 0, '正在核验充值信息', '核对账号信息，为本次充值做好准备。');
-                    // TangLang / vip666 的 step2 只有 UUID 格式校验，本地已完成；IPiap 仍保留上游预检。
-                    if (!['hongyun', 'tanglang', 'vip666'].includes(flow.provider)) {
-                        const r2 = await apiFetch(API.step2, {
-                            method: 'POST',
-                            body: JSON.stringify({organizationId: flow.claudeUserId, serialNumber: flow.cdk, provider: flow.provider})
-                        });
-                        if (!r2.ok || !isBizSuccess(r2.body)) throw new Error(getErrorMessage(r2, '账号校验失败'));
-                    }
+  if (!r.ok || !isBizSuccess(r.json)) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: r.json || { code: r.status || 502, message: "IPiap Claude 账号校验失败" },
+    };
+  }
 
-                    stage = 1;
-                    updateDelivery('working', 1, '正在提交会员充值', '充值信息已核对，正在等待发货受理。');
-                    flow.submittedAt = Date.now();
-                    flow.submitted = true;
-                    let r3;
-                    try {
-                        r3 = await apiFetch(API.step3, {
-                            method:'POST', timeoutMs:35000,
-                            body:JSON.stringify({organizationId:flow.claudeUserId, serialNumber:flow.cdk, provider:flow.provider, recharge_mode:'claude_org', confirm_overwrite:false})
-                        });
-                    } catch (err) {
-                        flow.submissionUncertain = true;
-                        if (['hongyun', 'tanglang'].includes(flow.provider)) flow.orderNo = flow.cdk;
-                        else throw err;
-                    }
+  const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  return {
+    status: 200,
+    body: {
+      code: 0,
+      msg: r.json.msg || r.json.message || "成功",
+      message: r.json.message || r.json.msg || "成功",
+      data: {
+        ...d,
+        valid: true,
+        organizationId: uid,
+        accountId: uid,
+        provider: "ipiap",
+        upstreamProvider: "ipiap",
+      },
+    },
+  };
+}
 
-                    if (r3) {
-                        const b3 = r3.body || {};
-                        const d3 = b3.data || {};
-                        flow.provider = d3.provider || b3.provider || flow.provider;
-                        flow.pollToken = d3.pollToken || d3.poll_token || b3.pollToken || b3.poll_token || '';
-                        if (!r3.ok || !isBizSuccess(b3)) {
-                            // 5xx / 网关响应不能证明提交失败；先查询，绝不自动重发兑换。
-                            if (r3.status >= 500 || r3.status === 408 || b3.error === 'invalid_json') {
-                                flow.submissionUncertain = true;
-                                if (['hongyun', 'tanglang'].includes(flow.provider)) flow.orderNo = flow.cdk;
-                                else throw new Error(getErrorMessage(r3, '提交结果暂未确认'));
-                            } else {
-                                flow.submitted = false;
-                                flow.submittedAt = 0;
-                                throw new Error(getErrorMessage(r3, '充值未受理'));
-                            }
-                        } else {
-                            flow.orderNo = String(d3.orderNo || d3.order_no || b3.orderNo || b3.order_no || '');
-                            flow.submissionUncertain = d3.submissionUncertain === true;
-                            const immediateStatus = Number(d3.orderStatus != null ? d3.orderStatus : b3.orderStatus);
-                            if (immediateStatus === 2) { finishDelivery(); return; }
-                            if (immediateStatus === 3) {
-                                flow.terminalFailed = true;
-                                updateDelivery('error', 1, '本次充值未完成', d3.message || b3.message || '上游返回发货失败，请查询卡密状态或联系客服。');
-                                setRedeemButtonText('核对信息后重新充值');
-                                return;
-                            }
-                            if (d3.possibleSuccess === true || d3.taskStatus === 'possible_success') {
-                                updateDelivery('pending', 2, '到账状态待核实', '服务返回可能已到账，请先前往 Claude 核对会员状态。', '暂未确认充值成功，请勿重复提交；可继续查询本订单。');
-                                setRedeemButtonText(flow.orderNo ? '继续查询发货结果' : '查询本次卡密状态');
-                                return;
-                            }
-                            if (!flow.orderNo) {
-                                flow.submissionUncertain = true;
-                                if (['hongyun', 'tanglang'].includes(flow.provider)) flow.orderNo = flow.cdk;
-                                else throw new Error('充值已提交，但暂未收到订单查询信息，请先查询卡密状态。');
-                            }
-                        }
-                    }
-                }
+async function ipiapRedeem(code, uid, env) {
+  const r = await upstreamJson(getIpiapBase(env) + "/app/recharge/step3", {
+    method: "POST",
+    headers: ipiapHeaders(env),
+    body: JSON.stringify({
+      organizationId: uid,
+      serialNumber: code,
+    }),
+  });
 
-                stage = 2;
-                updateDelivery('working', 2, '正在确认会员到账', flow.submissionUncertain ? '提交结果暂未确认，正在查询本次充值，请勿重复提交。' : '充值已受理，到账后会立即在这里通知您。');
-                const fin = await pollOrderResult(flow.orderNo);
-                if (fin.ok) { finishDelivery(); return; }
-                if (fin.possible) {
-                    updateDelivery('pending', 2, '到账状态待核实', '服务返回可能已到账，请先前往 Claude 核对会员状态。', '暂未确认充值成功，请勿重复提交；可继续查询本订单。');
-                } else if (fin.failed) {
-                    flow.terminalFailed = true;
-                    updateDelivery('error', 2, '本次充值未完成', fin.reason || '发货未成功，请查询卡密状态或联系客服核对。', '请核对账号信息，确认无误后可重新尝试。');
-                } else {
-                    updateDelivery('pending', 2, '发货结果待确认', fin.reason ? '暂时无法确认到账结果，请稍后继续查询。' : '本次充值仍在处理中，您可以继续查询发货结果。', '订单已保留，继续查询不会重复提交充值。');
-                }
-                setRedeemButtonText(flow.terminalFailed ? '核对信息后重新充值' : '继续查询发货结果');
-            } catch (err) {
-                if (flow.submitted) {
-                    updateDelivery('pending', stage, '提交结果待确认', '暂未收到完整的充值结果，请先查询卡密状态或联系客服核对。', '为避免重复充值，本页不会自动重新提交。');
-                    setRedeemButtonText(flow.orderNo ? '继续查询发货结果' : '查询本次卡密状态');
-                } else {
-                    updateDelivery('error', stage, '暂时未能开始充值', err.message || '请稍后重试。', '您可以返回核对信息后重试。');
-                    setRedeemButtonText('重新尝试充值');
-                }
-            } finally {
-                stopDeliveryClock();
-                rechargeRunning = false;
-                setBtnLoading(btn, false);
-                renderRechargeConfirmation();
-            }
-        }
+  if (!r.ok || !isBizSuccess(r.json)) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: r.json || { code: r.status || 502, message: "IPiap 创建充值订单失败" },
+    };
+  }
 
-        async function pollOrderResult(orderNo) {
-            // 按真实时间限时：TangLang 自动重试窗口约 25 分钟；立即首查，随后逐步放缓。
-            const isTangLang = ['hongyun', 'tanglang'].includes(flow.provider);
-            const deadline = Date.now() + (isTangLang ? 1500000 : 120000);
-            const startedAt = Date.now();
-            let consecutiveErrors = 0;
-            let lastError = '';
-            while (Date.now() < deadline) {
-                try {
-                    const r = await apiFetch(API.step4, {
-                        method:'POST', timeoutMs:Math.min(30000, deadline - Date.now()),
-                        body:JSON.stringify({orderNo, provider:flow.provider, pollToken:flow.pollToken, submittedAt:flow.submittedAt, submissionUncertain:flow.submissionUncertain})
-                    });
-                    const b = r.body || {};
-                    const d = b.data || {};
-                    const status = Number(d.orderStatus != null ? d.orderStatus : b.orderStatus);
-                    if (r.ok && isBizSuccess(b)) {
-                        if (status === 2) return {ok:true, body:b};
-                        if (status === 3) return {failed:true, reason:d.message || b.msg || b.message || '发货失败', body:b};
-                        if (d.possibleSuccess === true || d.taskStatus === 'possible_success') return {possible:true};
-                        if (d.retried) {
-                            setDeliveryDescription('本次充值正在重新处理' + (Number(d.attempt) > 1 ? '（第 ' + Number(d.attempt) + ' 次）' : '') + '，请等待到账确认。');
-                        }
-                        consecutiveErrors = 0;
-                        lastError = '';
-                    } else {
-                        lastError = getErrorMessage(r, '暂未查询到发货结果');
-                        consecutiveErrors++;
-                    }
-                } catch (err) {
-                    lastError = err.message;
-                    consecutiveErrors++;
-                }
-                if (consecutiveErrors >= 3) return {timeout:true, reason:lastError};
-                const elapsed = Date.now() - startedAt;
-                if (elapsed >= 30000 && !document.getElementById('deliveryDescription').textContent.includes('重新处理')) {
-                    setDeliveryDescription('发货处理比平时稍久，正在为您持续查询。');
-                }
-                const remaining = deadline - Date.now();
-                if (remaining <= 0) break;
-                const delay = consecutiveErrors ? 3000 : (elapsed < 12000 ? 1000 : (elapsed < 120000 ? 2500 : 5000));
-                await sleep(Math.min(delay, remaining));
-            }
-            return {timeout:true, reason:lastError};
-        }
+  const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  const orderNo = String(d.orderNo || d.order_no || "").trim();
 
-        async function saveUsageRecord(record) {
-            for (let i = 0; i < 2; i++) {
-                try {
-                    const r = await apiFetch(API.saveRecord, {
-                        method:'POST', timeoutMs:8000,
-                        body:JSON.stringify({serialNumber:record.cdk, organizationId:record.claudeUserId, provider:record.provider, pollToken:record.pollToken})
-                    });
-                    if (r.ok && isBizSuccess(r.body)) return true;
-                } catch (e) { /* 只重试记录同步，不重发兑换。 */ }
-                if (i === 0) await sleep(800);
-            }
-            return false;
-        }
+  if (!orderNo) {
+    return {
+      status: 502,
+      body: { code: 502, message: "IPiap 已受理充值，但没有返回 orderNo", data: d },
+    };
+  }
 
-        function resetFlow() {
-            stopDeliveryClock();
-            delete document.getElementById('step3').dataset.delivery;
-            rechargeDone = false;
-            rechargeRunning = false;
-            flow.cdk = '';
-            flow.claudeUserId = '';
-            flow.productName = '';
-            flow.orderNo = '';
-            flow.provider = '';
-            flow.pollToken = '';
-            flow.submittedAt = 0;
-            flow.submissionUncertain = false;
-            flow.submitted = false;
-            flow.terminalFailed = false;
+  return ok({
+    ...d,
+    orderNo,
+    order_no: orderNo,
+    orderStatus: 1,
+    status: 1,
+    organizationId: uid,
+    accountId: uid,
+    serialNumber: code,
+    provider: "ipiap",
+    upstreamProvider: "ipiap",
+  });
+}
 
-            const cc = document.getElementById('cardCode');
-            const cu = document.getElementById('claudeUserId');
-            if (cc) cc.value = '';
-            if (cu) cu.value = '';
-            clearMsg('step1-result');
-            clearMsg('step2-result');
-            clearMsg('step3-result');
-            const info = document.getElementById('cardInfo');
-            if (info) info.textContent = '';
-            const btnText = document.getElementById('startRechargeBtnText');
-            if (btnText) btnText.textContent = '确认无误，立即充值';
-            const startBtn = document.getElementById('startRechargeBtn');
-            if (startBtn) {
-                startBtn.classList.add('btn-cta-pulse');
-                setBtnLoading(startBtn, false);
-            }
-            renderRechargeConfirmation();
-            goToStep(1);
-            if (cc) {
-                try { cc.focus(); } catch (e) {}
-            }
-        }
+async function ipiapOrderQuery(orderNo, env) {
+  const r = await upstreamJson(getIpiapBase(env) + "/app/recharge/step4", {
+    method: "POST",
+    headers: ipiapHeaders(env),
+    body: JSON.stringify({ orderNo }),
+  });
 
-        /* ---------- 卡密查询：Worker 自动识别双后台；vip666 使用 query-batch ---------- */
-        function toggleQuerySection() {
-            const section = document.getElementById('querySection');
-            const icon = document.getElementById('queryToggleIcon');
-            section.style.display = section.style.display === 'none' ? 'block' : 'none';
-            icon.textContent = section.style.display === 'none' ? '▼' : '▲';
-        }
+  if (!r.ok || !isBizSuccess(r.json)) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: r.json || { code: r.status || 502, message: "IPiap 订单状态查询失败" },
+    };
+  }
 
-        function formatCardQueryItem(item) {
-            const code = item.code || item.card_code || item.cardCode || item.serialNumber || '-';
-            const status = Number(item.status);
-            let line;
-            if (status === 0) line = code + ': ✅ 未使用';
-            else if (status === 1 || status === 2) line = code + ': ✅ ' + (item.message || '已使用');
-            else if (status === 8) line = code + ': ⏳ ' + (item.message || '处理中');
-            else line = code + ': ⚠️ ' + (item.message || '异常/作废');
+  const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  let orderStatus = Number(d.orderStatus != null ? d.orderStatus : d.order_status);
+  if (!Number.isFinite(orderStatus)) orderStatus = 1;
 
-            const productName = item.productName || item.product_name || item.planName || item.plan_name || '';
-            if (productName) line += ' · ' + productName;
+  const reason = String(d.reason || d.message || d.msg || "").trim();
 
-            // vip666 query-batch 会返回 AccountID / 开通时间；兼容不同字段命名。
-            const orgId = item.organizationId || item.organization_id || item.accountId || item.account_id ||
-                item.orgId || item.org_id || item.targetAccountId || item.target_account_id || '';
-            if (orgId) line += ' · 组织ID：' + orgId;
+  return {
+    status: 200,
+    body: {
+      code: 0,
+      msg: r.json.msg || r.json.message || "成功",
+      message: reason || (orderStatus === 2 ? "充值成功" : (orderStatus === 3 ? "充值失败" : "处理中")),
+      data: {
+        ...d,
+        orderNo: d.orderNo || d.order_no || orderNo,
+        order_no: d.order_no || d.orderNo || orderNo,
+        orderStatus,
+        reason,
+        provider: "ipiap",
+        upstreamProvider: "ipiap",
+      },
+    },
+  };
+}
 
-            const rechargeTime = item.usedTime || item.used_time || item.usedAt || item.used_at ||
-                item.redeemedAt || item.redeemed_at || item.activatedAt || item.activated_at ||
-                item.completedAt || item.completed_at || item.openTime || item.open_time || '';
-            if (rechargeTime) line += ' · 充值时间：' + formatTime(rechargeTime);
+async function ipiapCardQuery(codes, env) {
+  return upstreamJson(getIpiapBase(env) + "/app/recharge/cardQuery", {
+    method: "POST",
+    headers: ipiapHeaders(env),
+    body: JSON.stringify({ codes }),
+  });
+}
 
-            return line;
-        }
+function normalizeIpiapQueryItem(raw) {
+  const d = raw && typeof raw === "object" ? raw : {};
+  const code = cleanCode(d.code || d.cardCode || d.card_code || d.serialNumber || "");
+  const rawStatus = d.status;
+  const n = Number(rawStatus);
+  const s = String(rawStatus == null ? "" : rawStatus).trim().toLowerCase();
 
-        async function queryCards() {
-            const input = document.getElementById('queryCodesInput');
-            const out = document.getElementById('queryResultsOutput');
-            const container = document.getElementById('queryResultsContainer');
-            const btn = document.getElementById('queryCardsBtn');
-            const codes = input.value.split(/[\n,\s]+/).map(s => s.trim()).filter(Boolean);
-            if (!codes.length) return;
+  // 已抓包确认 status=0 为“未使用”。
+  // 页面同时存在“已使用 / 已过期 / 卡密不存在”筛选，下面兼容常见数字/字符串状态。
+  let status = 9;
+  let message = String(d.message || d.msg || "").trim();
 
-            setBtnLoading(btn, true, '正在查询');
-            container.style.display = 'block';
-            out.value = '查询中…';
+  if (n === 0 || ["unused", "available", "active", "valid", "new"].includes(s)) {
+    status = 0;
+    if (!message) message = "未使用";
+  } else if (n === 1 || ["used", "redeemed", "success", "completed"].includes(s)) {
+    status = 1;
+    if (!message) message = "已使用";
+  } else if (n === 2 || ["expired", "expire"].includes(s)) {
+    // 前端现有协议没有独立“过期”数字状态，因此保留为异常类并用 message 精确显示。
+    status = 9;
+    if (!message) message = "已过期";
+  } else if (n === 3 || ["not_found", "notfound", "missing", "invalid"].includes(s)) {
+    status = 9;
+    if (!message) message = "卡密不存在";
+  } else if (["processing", "pending", "running"].includes(s)) {
+    status = 8;
+    if (!message) message = "处理中";
+  } else {
+    status = 9;
+    if (!message) message = "状态未知";
+  }
 
-            try {
-                const r = await apiFetch(API.cardQuery, {
-                    method: 'POST',
-                    body: JSON.stringify({ codes: codes })
-                });
-                const b = r.body || {};
-                if (!r.ok || !isBizSuccess(b) || !Array.isArray(b.data)) {
-                    out.value = '查询失败：' + getErrorMessage(r, '上游接口异常或卡密格式错误');
-                    return;
-                }
-                out.value = b.data.map(formatCardQueryItem).join('\n') || '未查询到结果';
-            } catch (e) {
-                out.value = '查询失败：网络连接错误';
-            } finally {
-                setBtnLoading(btn, false);
-            }
-        }
+  const productName = firstNonEmpty(
+    d.productName, d.product_name, d.product, "Claude Pro - Monthly"
+  );
+  const email = firstNonEmpty(
+    d.email, d.accountEmail, d.account_email
+  );
+  const organizationId = firstNonEmpty(
+    d.organizationId, d.organization_id,
+    d.accountId, d.account_id,
+    d.userId, d.user_id
+  );
+  const usedTime = firstNonEmpty(
+    d.usedTime, d.used_time,
+    d.usedAt, d.used_at,
+    d.redeemedAt, d.redeemed_at,
+    d.createTime, d.create_time
+  );
 
-    </script>
-</body>
-</html>
+  return {
+    ...d,
+    code,
+    status,
+    rawStatus,
+    message,
+    productName,
+    email,
+    organizationId,
+    accountId: organizationId,
+    usedTime,
+    provider: "ipiap",
+    upstreamProvider: "ipiap",
+  };
+}
+
+
+/* ============================= vip666ai ============================= */
+
+async function vipQueryChallenge(env) {
+  const base = getVip666Base(env);
+  const url = base + "/api/user/cards/query-challenge";
+
+  // 先访问一次 /query，尽量拿到上游给浏览器分配的 ogp_query_browser / CDN Cookie。
+  // 即使页面正文是 HTML，upstreamJson 仍会保留响应头，所以这里只取 Cookie。
+  const bootstrap = await upstreamJson(base + "/query", {
+    method: "GET",
+    headers: vipQueryHeaders("", false),
+  }, true);
+  let cookieHeader = responseCookieHeader(bootstrap.headers);
+
+  // 当前页面行为是创建 challenge；优先 POST。若上游改成 GET，则自动兼容 404/405。
+  let r = await upstreamJson(url, {
+    method: "POST",
+    headers: vipQueryHeaders(cookieHeader, true),
+    body: JSON.stringify({}),
+  }, true);
+
+  if (r.status === 404 || r.status === 405) {
+    r = await upstreamJson(url, {
+      method: "GET",
+      headers: vipQueryHeaders(cookieHeader, false),
+    }, true);
+  }
+
+  cookieHeader = mergeCookieHeader(cookieHeader, responseCookieHeader(r.headers));
+  return { ...r, cookieHeader };
+}
+
+async function vipVerifyQueryChallenge(challengeId, answer, cookieHeader, env) {
+  return upstreamJson(getVip666Base(env) + "/api/user/cards/query-challenge/verify", {
+    method: "POST",
+    headers: vipQueryHeaders(cookieHeader, true),
+    body: JSON.stringify({
+      challenge_id: challengeId,
+      answer: answer,
+    }),
+  }, true);
+}
+
+async function vipQueryBatch(codes, env, cookieHeader) {
+  const r = await upstreamJson(getVip666Base(env) + "/api/user/cards/query-batch", {
+    method: "POST",
+    headers: vipQueryHeaders(cookieHeader, true),
+    body: JSON.stringify({ codes }),
+  });
+
+  const data = r.json && r.json.data;
+  const items = Array.isArray(data)
+    ? data
+    : (data && Array.isArray(data.list) ? data.list : []);
+  const reason = businessMessage(r.json, "vip666ai 卡密查询失败");
+  const needVerification = !r.ok || !isBizSuccess(r.json)
+    ? /人机验证|安全验证|验证码|captcha|challenge|verify|verification/i.test(String(reason || ""))
+    : false;
+
+  return {
+    ...r,
+    items,
+    success: r.ok && isBizSuccess(r.json) && Array.isArray(items),
+    needVerification,
+    reason,
+  };
+}
+
+function vipQueryHeaders(cookieHeader, withContentType = true) {
+  const h = vipHeaders(withContentType);
+  h.set("Referer", "https://vip666ai.com/query");
+  if (cookieHeader) h.set("Cookie", cookieHeader);
+  return h;
+}
+
+function responseCookieHeader(headers) {
+  if (!headers) return "";
+  let lines = [];
+  try {
+    if (typeof headers.getSetCookie === "function") lines = headers.getSetCookie() || [];
+  } catch (_) {}
+  if (!lines.length) {
+    const one = headers.get("set-cookie") || "";
+    if (one) lines = [one];
+  }
+
+  const cookies = new Map();
+  for (const line of lines) {
+    const text = String(line || "");
+    const re = /(?:^|,\s*)([!#$%&'*+\-.^_`|~0-9A-Za-z]+)=([^;,\r\n]*)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      const name = String(m[1] || "").trim();
+      const value = String(m[2] || "").trim();
+      if (name) cookies.set(name, value);
+    }
+  }
+  return Array.from(cookies.entries()).map(([k, v]) => k + "=" + v).join("; ");
+}
+
+function mergeCookieHeader(base, incoming) {
+  const jar = new Map();
+  const add = (text) => {
+    String(text || "").split(";").forEach(part => {
+      const idx = part.indexOf("=");
+      if (idx <= 0) return;
+      const name = part.slice(0, idx).trim();
+      const value = part.slice(idx + 1).trim();
+      if (name) jar.set(name, value);
+    });
+  };
+  add(base);
+  add(incoming);
+  return Array.from(jar.entries()).map(([k, v]) => k + "=" + v).join("; ");
+}
+
+function findChallengeId(body, headers) {
+  const fromHeader = headers && (
+    headers.get("x-challenge-id") || headers.get("challenge-id") || headers.get("x-captcha-id")
+  );
+  if (fromHeader) return String(fromHeader).trim();
+
+  const found = deepFindString(body, (key, value) => {
+    const k = key.toLowerCase();
+    return (k === "challenge_id" || k === "challengeid" || k === "captcha_id" || k === "captchaid") && value.length >= 6;
+  });
+  if (found) return found;
+
+  const d = body && body.data && typeof body.data === "object" ? body.data : {};
+  return firstNonEmpty(d.id, body && body.challenge_id, body && body.challengeId);
+}
+
+function findChallengeImage(body) {
+  let found = deepFindString(body, (key, value) => {
+    const k = key.toLowerCase();
+    const keyLooksRight = /image|img|captcha|challenge/.test(k);
+    const valueLooksRight = /^data:image\//i.test(value) || /^https?:\/\//i.test(value) || value.length > 80;
+    return keyLooksRight && valueLooksRight;
+  });
+  if (!found) {
+    found = deepFindString(body, (_key, value) => /^data:image\//i.test(value));
+  }
+  if (!found) return "";
+  found = String(found).trim();
+  if (/^data:image\//i.test(found) || /^https?:\/\//i.test(found)) return found;
+  if (found.startsWith("/")) return DEFAULT_VIP666_BASE + found;
+  if (/^[A-Za-z0-9+/=\r\n]+$/.test(found) && found.replace(/\s+/g, "").length > 80) {
+    return "data:image/png;base64," + found.replace(/\s+/g, "");
+  }
+  return found;
+}
+
+function deepFindString(obj, predicate, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 6) return "";
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (text && predicate(String(key), text)) return text;
+    }
+  }
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === "object") {
+      const found = deepFindString(value, predicate, depth + 1);
+      if (found) return found;
+    }
+  }
+  return "";
+}
+
+function normalizeVipQueryItem(raw) {
+  const item = raw && typeof raw === "object" ? raw : {};
+  const code = cleanCode(item.code || item.card_code || item.cardCode || item.serialNumber || "");
+  const rawStatus = String(item.status == null ? "" : item.status).trim().toLowerCase();
+
+  // vip666 query-batch 的 status 是字符串。截图中已完成卡返回 success。
+  // 统一转换成前端现有约定：0=未使用，1/2=已使用/成功，其它=异常或处理中。
+  let status = 9;
+  let message = String(item.message || item.msg || item.public_message || "").trim();
+
+  if (["unused", "available", "valid", "new", "ready", "0"].includes(rawStatus)) {
+    status = 0;
+    if (!message) message = "未使用";
+  } else if (["success", "used", "completed", "done", "redeemed", "1", "2"].includes(rawStatus)) {
+    status = 1;
+    if (!message) message = "已使用";
+  } else if (["processing", "pending", "running", "queued"].includes(rawStatus)) {
+    status = 8;
+    if (!message) message = "处理中";
+  } else if (["invalid", "void", "expired", "disabled", "failed", "error"].includes(rawStatus)) {
+    status = 9;
+    if (!message) message = rawStatus === "invalid" ? "无效" : "异常/作废";
+  } else if (item.used === true || item.is_used === true || item.isUsed === true) {
+    status = 1;
+    if (!message) message = "已使用";
+  } else if (item.valid === true && item.used !== true && item.is_used !== true && item.isUsed !== true) {
+    status = 0;
+    if (!message) message = "未使用";
+  }
+
+  const productName = firstNonEmpty(
+    item.product_name, item.productName, item.plan_name, item.planName, item.product, "Claude Pro"
+  );
+
+  // query-batch 的详情页会显示 AccountID 与开通时间。
+  // 同时兼容 snake_case / camelCase / 不同后端历史字段名。
+  const organizationId = firstNonEmpty(
+    item.account_id,
+    item.accountId,
+    item.organization_id,
+    item.organizationId,
+    item.org_id,
+    item.orgId,
+    item.target_account_id,
+    item.targetAccountId,
+    item.claude_account_id,
+    item.claudeAccountId
+  );
+
+  const usedTime = firstNonEmpty(
+    item.used_time,
+    item.usedTime,
+    item.used_at,
+    item.usedAt,
+    item.redeemed_at,
+    item.redeemedAt,
+    item.activated_at,
+    item.activatedAt,
+    item.completed_at,
+    item.completedAt,
+    item.success_at,
+    item.successAt,
+    item.opened_at,
+    item.openedAt,
+    item.open_time,
+    item.openTime
+  );
+
+  const email = firstNonEmpty(
+    item.email,
+    item.account_email,
+    item.accountEmail,
+    item.open_email,
+    item.openEmail
+  );
+
+  return {
+    ...item,
+    code,
+    status,
+    rawStatus,
+    message,
+    productName,
+    organizationId,
+    accountId: organizationId,
+    usedTime,
+    email,
+    provider: "vip666",
+  };
+}
+
+async function vipProbe(code, env) {
+  const r = await upstreamJson(getVip666Base(env) + "/api/user/cards/probe", {
+    method: "POST",
+    headers: vipHeaders(),
+    body: JSON.stringify({ code }),
+  });
+  const data = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  const success = r.ok && isBizSuccess(r.json) && data.valid === true;
+  let reason = businessMessage(r.json, "充值码不可用或已使用");
+  if (!success && data.valid === false && /^(ok|success|成功)$/i.test(reason)) {
+    reason = "充值码不可用或已使用";
+  }
+  return {
+    ...r,
+    data,
+    success,
+    reason,
+  };
+}
+
+async function vipRedeem(code, uid, input, env) {
+  const body = {
+    account_id: uid,
+    account_id_confirm: uid,
+    card_code: code,
+    confirm_overwrite: Boolean(input.confirm_overwrite),
+    recharge_mode: String(input.recharge_mode || "claude_org"),
+  };
+
+  const r = await upstreamJson(getVip666Base(env) + "/api/user/redeem", {
+    method: "POST",
+    headers: vipHeaders(),
+    body: JSON.stringify(body),
+  }, true);
+
+  if (!r.ok || !isBizSuccess(r.json)) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: r.json || { code: r.status || 502, message: "vip666ai 充值请求失败" },
+    };
+  }
+
+  const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  const orderNo = String(d.order_no || d.orderNo || r.json.order_no || r.json.orderNo || "").trim();
+  if (!orderNo) {
+    return {
+      status: 502,
+      body: { code: 502, message: "vip666ai 已受理请求，但未返回订单号" },
+    };
+  }
+
+  const queryToken =
+    r.headers.get("x-order-query-token") ||
+    r.headers.get("x-query-token") ||
+    findQueryToken(r.json) || "";
+
+  const setCookie = r.headers.get("set-cookie") || "";
+  const recoveryCookie = extractCookie(setCookie, "ogp_order_recovery");
+
+  // 截图显示后续 GET /api/user/orders/{orderNo} 同时携带：
+  // Cookie: ogp_order_recovery=... 以及 X-Order-Query-Token: ...
+  // 这里把两项封装给 step4；若上游字段名变化，findQueryToken 会递归查找 *token* 字段。
+  const pollToken = await makePollToken({
+    p: "vip666",
+    orderNo,
+    recoveryCookie,
+    queryToken,
+    exp: Date.now() + 24 * 60 * 60 * 1000,
+  }, env);
+
+  return ok({
+    orderNo,
+    orderStatus: Number(d.status != null ? d.status : 1),
+    message: d.message || r.json.message || "充值已受理，正在处理中",
+    provider: "vip666",
+    pollToken,
+    queryReady: Boolean(queryToken && recoveryCookie),
+  });
+}
+
+async function vipOrderQuery(orderNo, pollToken, env) {
+  if (!pollToken) return bad("缺少 vip666ai 订单查询凭据，请重新提交充值");
+
+  let state;
+  try {
+    state = await readPollToken(pollToken, env);
+  } catch (err) {
+    return { status: 400, body: { code: 400, message: "订单查询凭据无效：" + err.message } };
+  }
+
+  if (state.p !== "vip666") return bad("订单查询凭据后台不匹配");
+  if (String(state.orderNo) !== orderNo) return bad("订单号与查询凭据不匹配");
+  if (state.exp && Date.now() > Number(state.exp)) return bad("订单查询凭据已过期，请重新提交");
+
+  const headers = vipHeaders(false);
+  if (state.recoveryCookie) headers.set("Cookie", "ogp_order_recovery=" + state.recoveryCookie);
+  if (state.queryToken) headers.set("X-Order-Query-Token", state.queryToken);
+
+  const r = await upstreamJson(
+    getVip666Base(env) + "/api/user/orders/" + encodeURIComponent(orderNo),
+    { method: "GET", headers },
+    false
+  );
+
+  if (!r.ok || !isBizSuccess(r.json)) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: r.json || { code: r.status || 502, message: "vip666ai 订单查询失败" },
+    };
+  }
+
+  const d = r.json && r.json.data && typeof r.json.data === "object" ? r.json.data : {};
+  const status = Number(d.status != null ? d.status : (d.order_status != null ? d.order_status : 0));
+  const failureReason = d.public_message || d.error_msg || d.failure_code || r.json.message || "";
+
+  return {
+    status: 200,
+    body: {
+      code: 0,
+      message: failureReason || r.json.message || "ok",
+      data: {
+        ...d,
+        orderNo: d.order_no || orderNo,
+        orderStatus: status,
+        provider: "vip666",
+      },
+      trace_id: r.json.trace_id || undefined,
+    },
+  };
+}
+
+function vipHeaders(withContentType = true) {
+  const h = new Headers();
+  h.set("Accept", "application/json, text/plain, */*");
+  h.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+  if (withContentType) h.set("Content-Type", "application/json");
+  h.set("Origin", "https://vip666ai.com");
+  h.set("Referer", "https://vip666ai.com/");
+  h.set("User-Agent", BROWSER_UA);
+  return h;
+}
+
+/* ============================= HongYun ============================== */
+
+async function hongyunAction(action, payload, env) {
+  const upstreamBase = getHongyunUpstream(env);
+  const target = upstreamBase + (upstreamBase.includes("?") ? "&" : "?") +
+    "action=" + encodeURIComponent(action);
+
+  const headers = new Headers();
+  headers.set("Accept", "application/json, text/plain, */*");
+  headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+  headers.set("Content-Type", "application/json");
+  headers.set("Origin", "https://tanglang123.applelll.com");
+  headers.set("Referer", "https://tanglang123.applelll.com/");
+  headers.set("User-Agent", BROWSER_UA);
+
+  const r = await upstreamJson(target, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload || {}),
+  });
+
+  return { ...r, success: r.ok && isBizSuccess(r.json) };
+}
+
+function hongyunNormalized(r, provider) {
+  if (!r.json) {
+    return {
+      status: normalizeHttpErrorStatus(r.status),
+      body: { code: r.status || 502, message: "HongYun 上游未返回 JSON" },
+    };
+  }
+  const body = cloneObject(r.json);
+  if (body && typeof body === "object") {
+    if (!body.data || typeof body.data !== "object" || Array.isArray(body.data)) {
+      // cardQuery 的 data 是数组，不能强行改成对象。
+      if (!Array.isArray(body.data)) body.data = {};
+    }
+    if (body.data && !Array.isArray(body.data)) body.data.provider = provider;
+  }
+  return { status: r.status, body };
+}
+
+/* ============================= 通用上游 ============================= */
+
+async function upstreamJson(url, init, keepHeaders = false, timeoutMs = 25000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("upstream timeout"), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, redirect: "follow", signal: controller.signal });
+    const text = await res.text();
+    let parsed = null;
+    let parseError = false;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch (_) {
+      parseError = true;
+      parsed = {
+        code: 502,
+        message: "上游返回了非 JSON 内容，可能被防火墙/验证页拦截",
+        sample: text.slice(0, 300),
+      };
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      json: parsed,
+      parseError,
+      headers: keepHeaders ? res.headers : res.headers,
+    };
+  } catch (err) {
+    const isTimeout = controller.signal.aborted || (err && (err.name === "AbortError" || String(err).includes("timeout")));
+    return {
+      ok: false,
+      status: isTimeout ? 504 : 502,
+      json: {
+        code: isTimeout ? 504 : 502,
+        error: isTimeout ? "upstream_timeout" : "upstream_unreachable",
+        message: isTimeout ? "上游接口响应超时" : "无法连接上游接口",
+        detail: String(err),
+      },
+      headers: new Headers(),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/* ============================= pollToken ============================ */
+
+async function makePollToken(payload, env) {
+  const body = base64UrlEncode(JSON.stringify(payload));
+  const secret = getPollSecret(env);
+  if (!secret) return body;
+  const sig = await hmacSha256(secret, body);
+  return body + "." + sig;
+}
+
+async function readPollToken(token, env) {
+  const parts = String(token || "").split(".");
+  const body = parts[0] || "";
+  const secret = getPollSecret(env);
+  if (secret) {
+    if (parts.length !== 2) throw new Error("缺少签名");
+    const expected = await hmacSha256(secret, body);
+    if (!safeEqual(expected, parts[1])) throw new Error("签名校验失败");
+  }
+  const obj = JSON.parse(base64UrlDecode(body));
+  if (!obj || typeof obj !== "object") throw new Error("内容为空");
+  return obj;
+}
+
+async function hmacSha256(secret, text) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(text));
+  return bytesToBase64Url(new Uint8Array(sig));
+}
+
+function safeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function base64UrlEncode(text) {
+  return bytesToBase64Url(new TextEncoder().encode(text));
+}
+
+function base64UrlDecode(text) {
+  let s = String(text).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function bytesToBase64Url(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+/* ============================= 小工具 =============================== */
+
+function findQueryToken(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  const preferred = [
+    "order_query_token", "orderQueryToken",
+    "query_token", "queryToken",
+    "order_token", "orderToken",
+  ];
+  for (const key of preferred) {
+    if (typeof obj[key] === "string" && obj[key].trim()) return obj[key].trim();
+  }
+  for (const [k, v] of Object.entries(obj)) {
+    if (/token/i.test(k) && typeof v === "string" && v.trim()) return v.trim();
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === "object") {
+      const found = findQueryToken(v);
+      if (found) return found;
+    }
+  }
+  return "";
+}
+
+function extractCookie(setCookie, name) {
+  if (!setCookie) return "";
+  const re = new RegExp("(?:^|[,;]\\s*)" + escapeRegex(name) + "=([^; ,]+)", "i");
+  const m = String(setCookie).match(re);
+  return m ? m[1] : "";
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function firstNonEmpty(...values) {
+  for (const v of values) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function cleanCode(v) {
+  return String(v == null ? "" : v).trim().replace(/\s+/g, "");
+}
+
+function looksLikeVip666Code(code) {
+  return /^CLAUDEPRO-/i.test(cleanCode(code));
+}
+
+function looksLikeIpiapCode(code) {
+  // 本次抓包样例：CPSV-... / CPQF-... / CPN2-...
+  // 统一按 CP 开头识别为 IPiap。
+  return /^CP[A-Z0-9]*-/i.test(cleanCode(code));
+}
+
+function inferProviderFromCode(code) {
+  if (looksLikeVip666Code(code)) return "vip666";
+  if (looksLikeIpiapCode(code)) return "ipiap";
+  return "hongyun";
+}
+
+function normalizeProvider(v) {
+  const p = String(v || "").trim().toLowerCase();
+  if (["vip", "vip666", "vip666ai", "vip666ai.com"].includes(p)) return "vip666";
+  if (["ipiap", "ipiap.com", "ipi"].includes(p)) return "ipiap";
+  // tanglang 也映射到历史 provider=hongyun，避免旧前端改动。
+  if (["hongyun", "hongyunai", "claude.hongyunai.pro", "tanglang", "tanglang123", "tanglang123.applelll.com"].includes(p)) return "hongyun";
+  return "";
+}
+
+function isBizSuccess(body) {
+  if (!body || typeof body !== "object") return false;
+  const code = body.code;
+  const msg = String(body.msg || body.message || "").toLowerCase();
+  return code === 0 || code === 200 || code === "0" || code === "200" ||
+    msg === "ok" || msg === "成功" || msg === "success";
+}
+
+function businessMessage(body, fallback) {
+  if (!body || typeof body !== "object") return fallback;
+  const d = body.data && typeof body.data === "object" ? body.data : {};
+  return String(
+    body.msg || body.message || body.error ||
+    d.public_message || d.error_msg || d.message || fallback
+  );
+}
+
+function businessCode(body, fallback) {
+  if (!body || typeof body !== "object") return fallback;
+  return body.code != null ? body.code : fallback;
+}
+
+function cloneObject(obj) {
+  try { return JSON.parse(JSON.stringify(obj)); }
+  catch (_) { return obj; }
+}
+
+function normalizeHttpErrorStatus(status) {
+  const n = Number(status || 0);
+  if (n >= 400 && n <= 599) return n;
+  return 400;
+}
+
+function ok(data) {
+  return { status: 200, body: { code: 0, message: "ok", data } };
+}
+
+function bad(message) {
+  return { status: 400, body: { code: 400, message } };
+}
+
+async function mapLimit(items, limit, fn) {
+  const queue = items.slice();
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) {
+      const item = queue.shift();
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
+function getHongyunUpstream(env) {
+  const v = env && typeof env.CLAUDE_UPSTREAM === "string" ? env.CLAUDE_UPSTREAM.trim() : "";
+  return v || DEFAULT_HONGYUN_UPSTREAM;
+}
+
+function getVip666Base(env) {
+  const v = env && typeof env.VIP666_BASE === "string" ? env.VIP666_BASE.trim() : "";
+  return (v || DEFAULT_VIP666_BASE).replace(/\/+$/g, "");
+}
+
+function getPollSecret(env) {
+  return env && typeof env.POLL_SECRET === "string" ? env.POLL_SECRET.trim() : "";
+}
+
+function cors(origin, env) {
+  const configured = env && typeof env.ALLOW_ORIGIN === "string" ? env.ALLOW_ORIGIN.trim() : "";
+  const allow = configured || "*";
+  const h = new Headers();
+
+  if (allow === "*") h.set("Access-Control-Allow-Origin", "*");
+  else if (!origin || origin === allow) h.set("Access-Control-Allow-Origin", allow);
+
+  h.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  h.set("Access-Control-Allow-Headers", "Content-Type, Accept");
+  h.set("Access-Control-Max-Age", "86400");
+  h.set("Vary", "Origin");
+  return h;
+}
+
+function json(obj, status, origin, env, extraHeaders) {
+  const h = cors(origin, env);
+  h.set("Content-Type", "application/json; charset=utf-8");
+  h.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  if (extraHeaders) {
+    for (const [k, v] of Object.entries(extraHeaders)) h.set(k, v);
+  }
+  return new Response(JSON.stringify(obj), { status, headers: h });
+}
+
+
+/* ============================= TangLang 后台 A =============================
+ * 已抓包确认：
+ * GET  /api/store/site?ref=tanglang123
+ * POST /api/store/redeem
+ * GET  /api/store/redeem/status?ref=tanglang123&cdk=...
+ * POST /api/store/redeem/status-batch
+ *
+ * Claude Pro product_id = 8（可用 TANGLANG_PRODUCT_ID 环境变量覆盖）
+ * ======================================================================= */
+
+function getTangLangBase(env) {
+  const v = env && typeof env.TANGLANG_BASE === "string" ? env.TANGLANG_BASE.trim() : "";
+  return (v || DEFAULT_HONGYUN_UPSTREAM).replace(/\/+$/g, "");
+}
+
+function getTanglangRef(env) {
+  const v = env && typeof env.TANGLANG_REF === "string" ? env.TANGLANG_REF.trim() : "";
+  return v || DEFAULT_TANGLANG_REF;
+}
+
+function getTanglangProductId(env) {
+  const v = env && env.TANGLANG_PRODUCT_ID != null ? Number(env.TANGLANG_PRODUCT_ID) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_TANGLANG_PRODUCT_ID;
+}
+
+function tanglangHeaders(withContentType = true, env) {
+  const h = new Headers();
+  h.set("Accept", "*/*");
+  h.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+  if (withContentType) h.set("Content-Type", "application/json");
+  const base = getTangLangBase(env);
+  h.set("Origin", new URL(base).origin);
+  h.set("Referer", base + "/");
+  h.set("User-Agent", BROWSER_UA);
+  return h;
+}
+
+function tanglangRedeemHeaders(env) {
+  const headers = tanglangHeaders(true, env);
+  // 与已核实的上游 mutationHeaders 相同；一次提交只生成一次，不以换 nonce 的方式重试。
+  const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(18)));
+  headers.set("X-ASP-Timestamp", String(Math.floor(Date.now() / 1000)));
+  headers.set("X-ASP-Nonce", nonce);
+  headers.set("Idempotency-Key", nonce);
+  return headers;
+}
+
+// 成功配置短期缓存；请求失败绝不降级为“无需验证”。缓存按上游地址和店铺隔离。
+const tanglangConfigCache = new Map();
+async function loadTanglangConfig(env) {
+  const base = getTangLangBase(env);
+  const ref = getTanglangRef(env);
+  const cacheKey = base + "\n" + ref;
+  const cached = tanglangConfigCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return { ok: true, data: cached.data };
+  const r = await upstreamJson(base + "/api/store/site?ref=" + encodeURIComponent(ref), {
+    method: "GET", headers: tanglangHeaders(false, env),
+  }, false, 10000);
+  const d = r.json;
+  if (!r.ok || r.parseError || !d || typeof d !== "object" || Array.isArray(d) ||
+      !Object.prototype.hasOwnProperty.call(d, "turnstile_site_key") ||
+      (d.turnstile_site_key != null && typeof d.turnstile_site_key !== "string") ||
+      typeof d.claude_sessionkey_enabled !== "boolean") {
+    tanglangConfigCache.delete(cacheKey);
+    return { ok: false, result: {
+      status: 503,
+      body: { code: 503, message: "暂时无法读取上游验证配置，请稍后重试；本次未提交充值", data: { submitted: false, configUnavailable: true } },
+    } };
+  }
+  const data = {
+    turnstileSiteKey: String(d.turnstile_site_key || "").trim(),
+    sessionKeyEnabled: d.claude_sessionkey_enabled === true,
+    upstreamUrl: base + "/",
+  };
+  if (tanglangConfigCache.size >= 20) tanglangConfigCache.clear();
+  tanglangConfigCache.set(cacheKey, { data, expiresAt: Date.now() + 30000 });
+  return { ok: true, data };
+}
+
+async function handleRechargeConfig(env) {
+  const config = await loadTanglangConfig(env);
+  return config.ok ? ok(config.data) : config.result;
+}
+
+// 不记录 SessionKey；若上游将凭证放进错误文本或嵌套响应，返回浏览器前一并清除。
+function redactTanglangSecrets(value, secrets = []) {
+  if (typeof value === "string") {
+    let clean = value;
+    for (const secret of secrets) if (secret) clean = clean.split(secret).join("[已隐藏]");
+    return clean.replace(/sk-ant-sid\d+-[A-Za-z0-9_-]+/g, "[已隐藏]");
+  }
+  if (Array.isArray(value)) return value.map(item => redactTanglangSecrets(item, secrets));
+  if (!value || typeof value !== "object") return value;
+  const clean = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (/(session.?key|turnstile.?token|cf-turnstile-response|authorization|password|secret|cookie)/i.test(key)) continue;
+    clean[key] = redactTanglangSecrets(item, secrets);
+  }
+  return clean;
+}
+
+async function tanglangStatusBatch(codes, env) {
+  return upstreamJson(getTangLangBase(env) + "/api/store/redeem/status-batch", {
+    method: "POST",
+    headers: tanglangHeaders(true, env),
+    body: JSON.stringify({
+      ref: getTanglangRef(env),
+      cdks: codes,
+    }),
+  });
+}
+
+async function tanglangGetStatus(code, env) {
+  const url = getTangLangBase(env) + "/api/store/redeem/status?ref=" +
+    encodeURIComponent(getTanglangRef(env)) + "&cdk=" + encodeURIComponent(code);
+  return upstreamJson(url, {
+    method: "GET",
+    headers: tanglangHeaders(false, env),
+  });
+}
+
+// TangLang HTTP 200 表示受理；只有明确的最终状态才表示发货完成。
+function tanglangData(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  return body.data && typeof body.data === "object" && !Array.isArray(body.data)
+    ? { ...body, ...body.data }
+    : body;
+}
+
+function tanglangExplicitRejection(d) {
+  if (d.success === false || d.ok === false || d.error) return true;
+  if (d.code == null || d.code === "") return false;
+  const n = Number(d.code);
+  return Number.isFinite(n) && n !== 0 && n !== 200 && n !== 202;
+}
+
+function tanglangFailureCode(d) {
+  const value = businessCode(d, 400);
+  return [0, 200, 202].includes(Number(value)) ? 400 : value;
+}
+
+function tanglangOrderState(d, context = {}) {
+  const st = String(d.status || "").toLowerCase();
+  const ts = String(d.task_status || d.taskStatus || "").toLowerCase();
+  const explicit = Number(d.orderStatus == null ? d.order_status : d.orderStatus);
+  // possible_success 绝不能被映射成确认成功。
+  if (st === "redeemed" || ts === "success") return 2;
+  if (ts === "possible_success") return 1;
+  if (explicit === 2) return 2;
+  if (["failed", "internal_error", "cancelled", "timeout"].includes(ts) ||
+      ["refunded", "failed", "cancelled"].includes(st) || explicit === 3) return 3;
+  if (st === "active") {
+    // 提交超时只代表结果未知；此时仍应查询，不能鼓励客户再次兑换。
+    if (context.submissionUncertain === true) return 1;
+    const submittedAt = Number(context.submittedAt);
+    const age = Date.now() - submittedAt;
+    if (Number.isFinite(submittedAt) && submittedAt > 0 && age >= -5000 && age < 90000) return 1;
+    // 旧客户端不传时间时保留原接口语义：active 表示未使用/已回滚。
+    return context.submitting ? 1 : 3;
+  }
+  return 1;
+}
+
+function tanglangPendingData(code, uid, email, d, extra = {}) {
+  const orderStatus = tanglangOrderState(d, { submitting: true });
+  return {
+    ...tanglangCompatData(d),
+    orderNo: code,
+    order_no: code,
+    orderStatus,
+    status: orderStatus,
+    message: tanglangMessage(d, orderStatus === 2 ? "充值成功" : orderStatus === 3 ? "充值失败" : "充值已受理，正在处理中"),
+    provider: "hongyun",
+    upstreamProvider: "tanglang",
+    cdk: code,
+    accountId: d.account_id || d.redeem_account_id || uid,
+    organizationId: d.account_id || d.redeem_account_id || uid,
+    email: d.email || d.redeem_email || email || "",
+    taskStatus: d.task_status || d.taskStatus || "",
+    possibleSuccess: String(d.task_status || d.taskStatus || "").toLowerCase() === "possible_success",
+    raw: d,
+    ...extra,
+  };
+}
+
+async function tanglangRedeem(code, uid, input, env) {
+  const credentials = claudeCredentials(input, "hongyun");
+  if (credentials.error) return bad(credentials.error);
+  const config = await loadTanglangConfig(env);
+  if (!config.ok) return config.result;
+  if (credentials.mode === "claude_session" && !config.data.sessionKeyEnabled) {
+    return { status: 400, body: { code: 400, message: "上游已关闭 SessionKey 充值，请改用 Organization ID", data: { submitted: false, sessionKeyDisabled: true } } };
+  }
+  const token = typeof input.turnstile_token === "string" ? input.turnstile_token.trim() : "";
+  if (config.data.turnstileSiteKey && (!token || token.length > 2048)) {
+    return { status: 428, body: { code: 428, message: "请先完成人机验证，再点击充值", data: { submitted: false, needTurnstile: true } } };
+  }
+  const productId = Number(input.product_id || input.productId || getTanglangProductId(env));
+  const payload = {
+    ref: getTanglangRef(env),
+    cdk: code,
+    product_id: Number.isFinite(productId) && productId > 0 ? productId : DEFAULT_TANGLANG_PRODUCT_ID,
+  };
+  if (credentials.mode === "claude_session") payload.session_key = credentials.sessionKey;
+  else payload.account_id = uid;
+  // token 一次性使用，由上游持有 secret 并执行 Siteverify；本 Worker 不提前消费。
+  if (token) payload.turnstile_token = token;
+  const email = String(input.email || "").trim();
+  if (email && credentials.mode !== "claude_session") payload.email = email;
+
+  // 兑换 POST 始终只发一次。网络错误/网关错误可能发生在上游已受理之后。
+  const r = await upstreamJson(getTangLangBase(env) + "/api/store/redeem", {
+    method: "POST",
+    headers: tanglangRedeemHeaders(env),
+    body: JSON.stringify(payload),
+  });
+  const d = tanglangData(redactTanglangSecrets(r.json, [credentials.sessionKey, token]));
+  const uncertain = !r.ok && (r.status >= 500 || r.status === 408);
+  if (uncertain || (r.ok && (r.parseError || !r.json || typeof r.json !== "object" || Array.isArray(r.json)))) {
+    return ok(tanglangPendingData(code, uid, email, {}, {
+      submissionUncertain: true,
+      message: "正在确认上游受理状态，请勿重复提交",
+    }));
+  }
+  if (!r.ok || tanglangExplicitRejection(d)) {
+    return {
+      status: r.ok ? 400 : normalizeHttpErrorStatus(r.status),
+      body: {
+        code: r.ok ? tanglangFailureCode(d) : r.status || 400,
+        message: tanglangMessage(d, "TangLang 充值请求失败"),
+        data: d,
+      },
+    };
+  }
+
+  // 直接复用提交响应中的最终状态，省去已完成订单的额外一轮查询。
+  return ok(tanglangPendingData(code, uid, email, d));
+}
+
+async function tanglangOrderQuery(code, env, context = {}) {
+  const r = await tanglangGetStatus(code, env);
+  if (!r.ok || !r.json || r.parseError) {
+    return {
+      status: r.ok ? 502 : normalizeHttpErrorStatus(r.status),
+      body: {
+        code: r.ok ? 502 : r.status || 502,
+        message: tanglangMessage(r.json, "TangLang 充值状态查询失败"),
+        data: r.json || null,
+      },
+    };
+  }
+  const d = tanglangData(r.json);
+  if (tanglangExplicitRejection(d)) {
+    return {
+      status: 400,
+      body: { code: tanglangFailureCode(d), message: tanglangMessage(d, "TangLang 充值状态查询失败"), data: d },
+    };
+  }
+  const orderStatus = tanglangOrderState(d, context);
+  const compat = tanglangCompatData(d);
+  return {
+    status: 200,
+    body: {
+      code: 0,
+      message: tanglangMessage(d, orderStatus === 2 ? "充值成功" : (orderStatus === 3 ? "充值失败" : "处理中")),
+      data: {
+        ...compat,
+        orderNo: code,
+        order_no: code,
+        orderStatus,
+        provider: "hongyun",
+        upstreamProvider: "tanglang",
+        submissionUncertain: context.submissionUncertain === true,
+        possibleSuccess: String(d.task_status || d.taskStatus || "").toLowerCase() === "possible_success",
+        rawStatus: String(d.status || "").toLowerCase(),
+      },
+    },
+  };
+}
+
+function normalizeTanglangQueryItem(raw) {
+  const d = raw && typeof raw === "object" ? raw : {};
+  const code = cleanCode(d.cdk || d.code || d.card_code || "");
+  const st = String(d.status || "").toLowerCase();
+  const ts = String(d.task_status || "").toLowerCase();
+
+  let status = 9;
+  let message = tanglangMessage(d, "");
+
+  if (d.found === false) {
+    status = 9;
+    if (!message) message = "无效";
+  } else if (st === "redeemed" || ts === "success") {
+    status = 1;
+    if (!message) message = "已使用";
+  } else if (st === "redeeming" || ["pending", "processing", "running", "queued"].includes(ts)) {
+    status = 8;
+    if (!message) message = "处理中";
+  } else if (st === "active") {
+    status = 0;
+    if (!message) message = "未使用";
+  } else if (st === "refunded") {
+    status = 0;
+    if (!message) message = "已退回，可重新使用";
+  } else if (["failed", "internal_error", "cancelled", "timeout"].includes(ts)) {
+    status = 9;
+    if (!message) message = "充值失败";
+  }
+
+  const compat = tanglangCompatData(d);
+  return {
+    ...d,
+    ...compat,
+    code,
+    status,
+    rawStatus: st,
+    taskStatus: ts,
+    message,
+    provider: "hongyun",
+    upstreamProvider: "tanglang",
+  };
+}
+
+function tanglangCompatData(d) {
+  d = d && typeof d === "object" ? d : {};
+  const organizationId = firstNonEmpty(
+    d.redeem_account_id,
+    d.account_id,
+    d.organization_id,
+    d.organizationId
+  );
+  const usedTime = firstNonEmpty(
+    d.redeemed_at,
+    d.used_time,
+    d.used_at
+  );
+  const email = firstNonEmpty(
+    d.redeem_email,
+    d.email,
+    d.account_email
+  );
+  const productName = firstNonEmpty(d.product_name, d.productName, "Claude Pro");
+
+  return {
+    ...d,
+    cdk: d.cdk || d.code || "",
+    productName,
+    product_name: d.product_name || productName,
+    organizationId,
+    organization_id: d.organization_id || organizationId,
+    accountId: organizationId,
+    redeemAccountId: organizationId,
+    redeem_account_id: d.redeem_account_id || organizationId,
+    usedTime,
+    redeemedAt: usedTime,
+    redeemed_at: d.redeemed_at || usedTime,
+    email,
+    redeemEmail: email,
+    redeem_email: d.redeem_email || email || null,
+    taskStatus: d.task_status || d.taskStatus || "",
+  };
+}
+
+function tanglangMessage(body, fallback) {
+  if (!body || typeof body !== "object") return fallback;
+  return String(
+    body.detail || body.message || body.msg || body.error || fallback || ""
+  );
+}
